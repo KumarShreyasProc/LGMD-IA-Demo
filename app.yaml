@@ -1,0 +1,6 @@
+command: ["python", "Backend/main.py"]
+env:
+  - name: DATABRICKS_WAREHOUSE_ID
+    valueFrom: sql-warehouse
+  - name: IA_SOURCE_TABLE
+    value: workspace.default.attruby_ia
