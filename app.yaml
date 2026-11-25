@@ -1,0 +1,3 @@
+# Databricks Apps runtime config
+# Builds the React frontend, then starts the Node server that serves it.
+command: ["sh", "-c", "npm run build && npm run start"]
