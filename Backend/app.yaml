@@ -1,0 +1,11 @@
+# Databricks Apps config (only used if you deploy this folder as a Databricks App).
+# In the app's settings add a "SQL warehouse" resource with key `sql-warehouse`
+# (Can use), and grant the app's service principal SELECT on the table.
+command: ["python", "main.py"]
+env:
+  - name: DATABRICKS_WAREHOUSE_ID
+    valueFrom: sql-warehouse
+  - name: IA_SOURCE_TABLE
+    value: workspace.default.attruby_ia
+  - name: IA_CACHE_TTL_SECONDS
+    value: "300"
