@@ -7,12 +7,14 @@ Run:  python -m pytest tests   (or)   python tests/test_backend.py
 """
 from __future__ import annotations
 
+import asyncio
 import datetime as dt
 import pathlib
 import random
 import sqlite3
 import sys
 import logging
+import tempfile
 import threading
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
@@ -259,6 +261,66 @@ def test_missing_calculated_columns_are_computed():
     assert "DATE_TRUNC('QUARTER', first_fill_date)" in source
     assert sorted(svc.schema_info["computed_in_backend"]) == sorted(
         ["SP_Start_60d_threshold", "SP_Start_60d_include_rule", "EnrollmentQuarterStartDate", "FFQuarterStartDate"])
+
+
+def _asgi_get(app, path: str):
+    """In-process GET against the ASGI app (no server, no extra dependencies)."""
+    scope = {"type": "http", "asgi": {"version": "3.0"}, "http_version": "1.1", "method": "GET",
+             "scheme": "http", "path": path, "raw_path": path.encode(), "root_path": "",
+             "query_string": b"", "headers": [(b"host", b"test")],
+             "client": ("test", 1), "server": ("test", 80)}
+
+    async def call() -> list[dict]:
+        sent: list[dict] = []
+        finished = asyncio.Event()
+        requested = False
+
+        async def receive():
+            nonlocal requested
+            if not requested:
+                requested = True
+                return {"type": "http.request", "body": b"", "more_body": False}
+            await finished.wait()  # report a disconnect only once the response is complete
+            return {"type": "http.disconnect"}
+
+        async def send(message):
+            sent.append(message)
+            if message["type"] == "http.response.body" and not message.get("more_body"):
+                finished.set()
+
+        await asyncio.wait_for(app(scope, receive, send), timeout=10)
+        return sent
+
+    sent = asyncio.run(call())
+    start = next(m for m in sent if m["type"] == "http.response.start")
+    headers = {k.decode().lower(): v.decode() for k, v in start["headers"]}
+    body = b"".join(m.get("body", b"") for m in sent if m["type"] == "http.response.body")
+    return start["status"], headers, body
+
+
+def test_frontend_is_served_at_root_without_shadowing_the_api():
+    from main import create_app
+
+    with tempfile.TemporaryDirectory() as tmp:
+        dist = pathlib.Path(tmp)
+        (dist / "assets").mkdir()
+        (dist / "index.html").write_text('<div id="root"></div>')
+        (dist / "assets" / "index-abc123.js").write_text("console.log(1)")
+        app = create_app(Settings(), frontend_dist=dist)
+
+        status, headers, body = _asgi_get(app, "/")
+        assert status == 200 and b'id="root"' in body
+        assert headers.get("cache-control") == "no-cache"
+        status, headers, _ = _asgi_get(app, "/assets/index-abc123.js")
+        assert status == 200 and "cache-control" not in headers
+        for path in ("/api/health", "/docs", "/openapi.json"):
+            assert _asgi_get(app, path)[0] == 200, path
+        status, _, body = _asgi_get(app, "/api/not-a-route")
+        assert status == 404 and b'id="root"' not in body
+
+        api_only = create_app(Settings(), frontend_dist=dist / "missing")
+        assert _asgi_get(api_only, "/api/health")[0] == 200
+        assert _asgi_get(api_only, "/")[0] == 404
 
 
 if __name__ == "__main__":

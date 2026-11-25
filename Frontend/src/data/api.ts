@@ -1,134 +1,123 @@
-// Data access layer.
-// USE_SAMPLE_DATA = true  → the UI runs on generated sample data (no Databricks needed).
-// USE_SAMPLE_DATA = false → calls your backend routes in server.js, which query the SQL warehouse.
-import { FIELDS, MEASURES, type Measure } from '../config/model';
+// Data access layer: every visual reads from the FastAPI backend under /api.
+// URLs are relative, so the same build works locally and on Databricks Apps.
+import { useEffect, useState } from 'react';
 
-export const USE_SAMPLE_DATA = true;
+export type Value = string | number | boolean | null;
+export type Row = Record<string, Value>;
 
-export type Filters = Record<string, string[]>;
+/** Backend filter object keyed by dimension name: a list means IN (null = Blank), objects are operators. */
+export type ApiFilters = Record<string, unknown>;
+/** Slicer selections: dimension name → selected values (empty = All). */
+export type Selections = Record<string, Value[]>;
 export interface DateRange { from: string; to: string }
+/** Date filters: date dimension name → range. */
+export type DateRanges = Record<string, DateRange>;
 
-// Deterministic pseudo-random so sample numbers don't jump on every render.
-function seeded(seed: number) {
-  let s = seed % 2147483647;
-  return () => (s = (s * 16807) % 2147483647) / 2147483647;
+export interface FieldMeta {
+  name: string;
+  label: string;
+  type: 'measure' | 'dimension' | 'other';
+  format?: string; // measures: number | percentage | timestamp; dimensions: string | number | date | timestamp
+  decimals?: number;
+}
+export interface QueryResult { columns: string[]; fields: FieldMeta[]; rows: Row[] }
+export interface KpiResult { values: Row; fields: FieldMeta[] }
+export interface PatientsResult extends QueryResult { total: number; limit: number; offset: number }
+export interface MeasureMeta { name: string; label: string; description: string; format: string; decimals: number }
+export interface Meta { measures: MeasureMeta[] }
+export type DateBasis = 'enrollment' | 'first_fill' | 'first_not_ft' | 'first_paid' | 'status_change';
+
+async function request<T>(path: string, body?: unknown): Promise<T> {
+  const res = await fetch(`/api/${path}`, body === undefined ? undefined : {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  const data = await res.json().catch(() => null);
+  if (!res.ok) {
+    const detail = data?.detail;
+    throw new Error(typeof detail === 'string' ? detail : detail ? JSON.stringify(detail) : `Request failed (HTTP ${res.status})`);
+  }
+  // A non-JSON 200 is usually a sign-in page after the Databricks session expired.
+  if (data === null) throw new Error('Unexpected response from the server. Reload the page and try again.');
+  return data as T;
 }
 
-const SAMPLE_VALUES: Record<string, string[]> = {
-  enrolling_hcp_area: ['East', 'Central', 'West'],
-  enrolling_hcp_city: ['New York', 'Boston', 'Atlanta', 'Houston', 'Chicago', 'Los Angeles'],
-  enrolling_hcp_hco: ['[HCO 01]', '[HCO 02]', '[HCO 03]', '[HCO 04]', '[HCO 05]'],
-  enrolling_hcp_region: ['[Region A]', '[Region B]', '[Region C]'],
-  enrolling_hcp_specialty: ['Neurology', 'Neuromuscular', 'Genetics', 'Pediatrics'],
-  enrolling_hcp_state: ['NY', 'MA', 'GA', 'TX', 'IL', 'CA'],
-  enrolling_hcp_territory: ['[Territory 01]', '[Territory 02]', '[Territory 03]', '[Territory 04]'],
-  hco_priority: ['Priority 1', 'Priority 2', 'Priority 3', 'Non-Priority'],
-  current_status: ['Active - Paid', 'Active - FT', 'Pending', 'Discontinued'],
-  enrollment_pyr_typ: ['Commercial', 'Medicare', 'Medicaid', 'Other'],
-  prgrm_nm: ['Commercial', 'Free Trial', 'Commercial; Free Trial'],
-  enrollment_month: ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun'],
-  month: ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun'],
-  sku: ['[SKU A]', '[SKU B]'],
-  atu_wave: ['[Wave 1]', '[Wave 2]'],
+export const api = {
+  meta: () => request<Meta>('meta'),
+  query: (body: { measures: string[]; dimensions: string[]; filters: ApiFilters; order_by?: string[]; limit?: number }) =>
+    request<QueryResult>('query', body),
+  kpis: (measures: string[], filters: ApiFilters = {}) => request<KpiResult>('kpis', { measures, filters }),
+  trend: (body: { date_basis: DateBasis; grain: 'month'; measures: string[]; filters: ApiFilters }) =>
+    request<QueryResult>('trend', body),
+  patients: (body: { columns: string[]; filters: ApiFilters; limit: number }) => request<PatientsResult>('patients', body),
+  filterOptions: (dimensions: string[], filters: ApiFilters) =>
+    request<{ options: Record<string, Value[]> }>('filter-options', { dimensions, filters }).then((r) => r.options),
 };
 
-function sampleValue(m: Measure, rand: () => number) {
-  switch (m.format) {
-    case 'pct': return 40 + rand() * 55;
-    case 'days': return 5 + rand() * 40;
-    case 'usd': return 50_000 + rand() * 900_000;
-    case 'ratio': return 1 + rand() * 3;
-    default: return Math.round(5 + rand() * 300);
+/** Slicer selections + date ranges → backend filter object (empty selections are left out). */
+export function toApiFilters(selections: Selections, dates: DateRanges = {}): ApiFilters {
+  const out: ApiFilters = {};
+  for (const [dim, values] of Object.entries(selections)) if (values.length) out[dim] = values;
+  for (const [dim, r] of Object.entries(dates)) if (r.from || r.to) out[dim] = { between: [r.from || null, r.to || null] };
+  return out;
+}
+
+export const byName = (fields: FieldMeta[] = []): Record<string, FieldMeta> =>
+  Object.fromEntries(fields.map((f) => [f.name, f]));
+
+/** Formats a value with the backend's field metadata (percentages arrive as fractions). */
+export function formatValue(value: Value | undefined, field?: FieldMeta): string {
+  if (value === null || value === undefined) return field?.type === 'measure' ? '' : '(Blank)';
+  const decimals = field?.decimals ?? 0;
+  const digits = { minimumFractionDigits: decimals, maximumFractionDigits: decimals };
+  switch (field?.format) {
+    case 'percentage':
+      return new Intl.NumberFormat(undefined, { style: 'percent', ...digits }).format(Number(value));
+    case 'number': // only measures get separators; number dimensions (e.g. year of birth) stay as-is
+      return field.type === 'measure' ? new Intl.NumberFormat(undefined, digits).format(Number(value)) : String(value);
+    case 'timestamp': {
+      const d = new Date(String(value));
+      return Number.isNaN(d.getTime()) ? String(value) : d.toLocaleString();
+    }
+    default:
+      return String(value);
   }
 }
 
-export interface SummaryRow { keys: string[]; values: number[] }
+export interface Loadable<T> { data?: T; error?: string; loading: boolean }
 
-/** Result table for the Summary page: selected fields (rows) × selected measures (columns). */
-export async function getSummary(fieldIds: string[], measureIds: string[], filters: Filters): Promise<SummaryRow[]> {
-  if (!USE_SAMPLE_DATA) {
-    const res = await fetch('/api/summary', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ fieldIds, measureIds, filters }) });
-    return res.json();
-  }
-  const measures = measureIds.map((id) => MEASURES.find((m) => m.id === id)!);
-  const lists = fieldIds.map((id) => SAMPLE_VALUES[id] ?? ['[Value]']);
-  // Cartesian product of the selected field values (capped for readability)
-  let combos: string[][] = [[]];
-  for (const list of lists) combos = combos.flatMap((c) => list.map((v) => [...c, v])).slice(0, 40);
-  const rand = seeded(fieldIds.join('').length * 97 + measureIds.join('').length * 31 + Object.keys(filters).length * 7 + 1);
-  return combos.map((keys) => ({ keys, values: measures.map((m) => sampleValue(m, rand)) }));
+/**
+ * Loads data whenever `key` changes (`null` = nothing to load). Responses for an
+ * older key are ignored, so fast filter changes never show stale results.
+ */
+export function useApi<T>(key: string | null, load: () => Promise<T>): Loadable<T> {
+  const [result, setResult] = useState<{ key: string; data?: T; error?: string }>();
+  useEffect(() => {
+    if (key === null) return;
+    let current = true;
+    load().then(
+      (data) => { if (current) setResult({ key, data }); },
+      (err: unknown) => { if (current) setResult({ key, error: err instanceof Error ? err.message : String(err) }); },
+    );
+    return () => { current = false; };
+  }, [key]);
+  if (key === null) return { loading: false };
+  if (result?.key !== key) return { loading: true };
+  return { data: result.data, error: result.error, loading: false };
 }
 
-export interface PatientRow { [col: string]: string | number }
-
-export const PATIENT_COLUMNS = [
-  'Source', 'New Patients Written', 'New Patients Filled', 'crx_ptnt_id', 'Patient Gender', 'Patient Year of Birth',
-  'Patient State', 'Latest_SP_ptnt_id', 'previous_targeted_therapy', 'current_status', 'initiated_therapy',
-  'initiated_paid_therapy', 'first_fill_shipment_type', 'enrolling_hcp_territory',
-];
-
-/** Patient-level rows for the Detailed Table View. */
-export async function getPatients(filters: Filters): Promise<PatientRow[]> {
-  if (!USE_SAMPLE_DATA) {
-    const res = await fetch('/api/patients', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ filters }) });
-    return res.json();
-  }
-  const rand = seeded(42);
-  const statuses = SAMPLE_VALUES.current_status;
-  const rows: PatientRow[] = Array.from({ length: 240 }, (_, i) => {
-    const status = statuses[Math.floor(rand() * statuses.length)];
-    const filled = status !== 'Pending';
-    return {
-      Source: 'SP/HUB',
-      'New Patients Written': 1,
-      'New Patients Filled': filled ? 1 : 0,
-      crx_ptnt_id: `ptnt_${(100000 + i * 7919).toString(16)}`,
-      'Patient Gender': rand() > 0.5 ? 'M' : 'F',
-      'Patient Year of Birth': 1940 + Math.floor(rand() * 60),
-      'Patient State': SAMPLE_VALUES.enrolling_hcp_state[Math.floor(rand() * 6)],
-      Latest_SP_ptnt_id: filled ? String(5000100000 + i) : '',
-      previous_targeted_therapy: rand() > 0.7 ? 'Yes' : 'None',
-      current_status: status,
-      initiated_therapy: filled ? 'Y' : 'N',
-      initiated_paid_therapy: status === 'Active - Paid' ? 'Y' : 'N',
-      first_fill_shipment_type: filled ? (status === 'Active - FT' ? 'FT' : 'Paid') : '',
-      enrolling_hcp_territory: SAMPLE_VALUES.enrolling_hcp_territory[Math.floor(rand() * 4)],
-    };
-  });
-  // Apply any column filters that match patient columns
-  return rows.filter((r) => Object.entries(filters).every(([k, vals]) => !vals.length || !(k in r) || vals.includes(String(r[k]))));
+/** Slicer values from /api/filter-options; each slicer respects the other active filters. */
+export function useFilterOptions(dimensions: string[], filters: ApiFilters) {
+  const key = dimensions.length ? JSON.stringify(['filter-options', dimensions, filters]) : null;
+  return useApi(key, () => api.filterOptions(dimensions, filters));
 }
 
-export interface SeriesPoint { label: string; [series: string]: string | number }
-
-/** Monthly series for the Charts pages. */
-export async function getSeries(chartId: string, seriesNames: string[], points = 18, scale = 100): Promise<SeriesPoint[]> {
-  if (!USE_SAMPLE_DATA) {
-    const res = await fetch(`/api/series/${chartId}`);
-    return res.json();
-  }
-  const rand = seeded(chartId.length * 131 + seriesNames.length);
-  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-  return Array.from({ length: points }, (_, i) => {
-    const p: SeriesPoint = { label: `${months[i % 12]} ${25 + Math.floor(i / 12)}` };
-    seriesNames.forEach((s, j) => {
-      const base = scale * (0.55 + 0.08 * j) + (scale * 0.25 * i) / points;
-      p[s] = Math.round((base * (0.85 + rand() * 0.3)) * 10) / 10;
-    });
-    return p;
-  });
-}
-
-export function fieldLabel(id: string) {
-  return FIELDS.find((f) => f.id === id)?.label ?? id;
-}
-
-export function formatValue(v: number, format: Measure['format']) {
-  switch (format) {
-    case 'pct': return `${v.toFixed(1)}%`;
-    case 'days': return `${v.toFixed(1)} d`;
-    case 'usd': return `$${Math.round(v).toLocaleString()}`;
-    case 'ratio': return v.toFixed(2);
-    default: return Math.round(v).toLocaleString();
-  }
+export function useDebounced<T>(value: T, ms = 300): T {
+  const [debounced, setDebounced] = useState(value);
+  useEffect(() => {
+    const t = setTimeout(() => setDebounced(value), ms);
+    return () => clearTimeout(t);
+  }, [value, ms]);
+  return debounced;
 }

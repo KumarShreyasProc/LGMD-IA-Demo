@@ -10,7 +10,7 @@ Streamlit or notebook frontend.
 
 ```
 Backend/
-├── main.py                  FastAPI app (uvicorn main:app)
+├── main.py                  FastAPI app (uvicorn main:app); also serves ../Frontend/dist at /
 ├── app.yaml                 Databricks Apps config (optional)
 ├── requirements.txt
 ├── .env.example             local settings template
@@ -124,12 +124,15 @@ trend = service.trend("first_fill", "month").to_dataframe()
 
 ## Deploying as a Databricks App
 
-1. Create an app with its source pointed at this `Backend` folder (from the Git folder).
+1. Create an app with its source pointed at the **repo root**. The root `app.yaml`
+   runs `python Backend/main.py`, which serves the API under `/api` and the built
+   dashboard (`Frontend/dist`, committed) at `/`. (Deploying only this `Backend`
+   folder with `Backend/app.yaml` also works, but then there is no dashboard.)
 2. Add a SQL warehouse resource with key `sql-warehouse` (permission: Can use).
 3. Grant the app's service principal `USE CATALOG` on `workspace`, `USE SCHEMA`
    on `workspace.default` and `SELECT` on `workspace.default.attruby_ia`.
 
-`app.yaml` starts the API; host and credentials are injected automatically,
+`app.yaml` starts the app; host and credentials are injected automatically,
 so no token is needed.
 
 ## Configuration

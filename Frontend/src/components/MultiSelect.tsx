@@ -1,14 +1,16 @@
 import { useEffect, useId, useRef, useState } from 'react';
+import { formatValue, type Value } from '../data/api';
 
 interface Props {
   label: string;
-  options: string[];
-  value: string[];
-  onChange: (next: string[]) => void;
+  options: Value[];
+  value: Value[];
+  onChange: (next: Value[]) => void;
+  loading?: boolean;
 }
 
-/** Power BI–style dropdown slicer: shows "All" when nothing is selected. */
-export function MultiSelect({ label, options, value, onChange }: Props) {
+/** Power BI–style dropdown slicer: shows "All" when nothing is selected; null is shown as "(Blank)". */
+export function MultiSelect({ label, options, value, onChange, loading = false }: Props) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const id = useId();
@@ -19,8 +21,10 @@ export function MultiSelect({ label, options, value, onChange }: Props) {
     return () => document.removeEventListener('mousedown', close);
   }, []);
 
-  const summary = value.length === 0 ? 'All' : value.length === 1 ? value[0] : `${value.length} selected`;
-  const toggle = (opt: string) => onChange(value.includes(opt) ? value.filter((v) => v !== opt) : [...value, opt]);
+  const summary = value.length === 0 ? 'All' : value.length === 1 ? formatValue(value[0]) : `${value.length} selected`;
+  const toggle = (opt: Value) => onChange(value.includes(opt) ? value.filter((v) => v !== opt) : [...value, opt]);
+  // Keep selected values listed even when other filters have removed them from the options.
+  const shown = [...value.filter((v) => !options.includes(v)), ...options];
 
   return (
     <div className="slicer" ref={ref}>
@@ -31,10 +35,12 @@ export function MultiSelect({ label, options, value, onChange }: Props) {
       {open && (
         <div className="slicer-menu" role="listbox" aria-multiselectable="true">
           <button type="button" className="slicer-clear" onClick={() => onChange([])}>Select all</button>
-          {options.map((opt) => (
-            <label key={opt} className="check">
+          {loading && <p className="muted">Loading values…</p>}
+          {!loading && shown.length === 0 && <p className="muted">No values</p>}
+          {shown.map((opt) => (
+            <label key={JSON.stringify(opt)} className="check">
               <input type="checkbox" checked={value.includes(opt)} onChange={() => toggle(opt)} />
-              {opt}
+              {formatValue(opt)}
             </label>
           ))}
         </div>

@@ -3,10 +3,19 @@ import { About } from './pages/About';
 import { Summary } from './pages/Summary';
 import { DetailedTable } from './pages/DetailedTable';
 import { Charts } from './pages/Charts';
-import { USE_SAMPLE_DATA } from './data/api';
+import { api, byName, formatValue, useApi } from './data/api';
 
 const PAGES = { About, Summary, 'Detailed Table View': DetailedTable, Charts } as const;
 type PageName = keyof typeof PAGES;
+
+/** When attruby_ia was last loaded (MAX(refresh_date)). */
+function RefreshDate() {
+  const refresh = useApi('refresh-date', () => api.kpis(['data_refresh_date']));
+  const text = refresh.loading ? '…'
+    : refresh.error ? 'unavailable'
+    : formatValue(refresh.data?.values.data_refresh_date, byName(refresh.data?.fields).data_refresh_date) || '–';
+  return <p className="refresh" title={refresh.error}>Refresh Date: <span>{text}</span></p>;
+}
 
 export default function App() {
   const [page, setPage] = useState<PageName>('Summary');
@@ -16,7 +25,7 @@ export default function App() {
       <header className="top">
         <span className="brand">bridgebio</span>
         <h1>Insights Accelerator</h1>
-        {USE_SAMPLE_DATA ? <span className="badge">Sample data</span> : <span />}
+        <span />
       </header>
       <div className="body">
         <aside className="side">
@@ -27,7 +36,7 @@ export default function App() {
               </button>
             ))}
           </nav>
-          <p className="refresh">Refresh Date: <span>{new Date().toLocaleDateString()}</span></p>
+          <RefreshDate />
         </aside>
         <main className="main"><Current /></main>
       </div>
