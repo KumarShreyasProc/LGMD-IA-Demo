@@ -156,6 +156,11 @@ so no token is needed.
   (`ia_backend/semantic_model.py`, `DERIVED_SOURCE_COLUMNS`). The threshold is
   computed as days from enrollment to today minus 1; if the DAX used
   `refresh_date` instead of today, change it there.
+- **Text-stored columns.** If `attruby_ia` stores numbers or dates as text with the
+  literal `'null'` for missing values (typical of a CSV upload), the backend casts
+  them to the model's type with `TRY_CAST` and turns `'null'` text into NULL.
+  `GET /api/health/db` lists them under `text_columns_typed_in_backend`. Loading the
+  table with proper types removes the need for this.
 - **Duplicate formulas.** `% Initiated_not_FT` and `%_Initiate_SP` are the same
   formula in the metric view (only the decimals differ), so they return the same value.
 - **Exclude-FT difference.** `%_Initiate_Paid_Exclude_FT` compares `LOWER(prgrm_nm)`,

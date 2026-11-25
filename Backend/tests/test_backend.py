@@ -263,6 +263,29 @@ def test_missing_calculated_columns_are_computed():
         ["SP_Start_60d_threshold", "SP_Start_60d_include_rule", "EnrollmentQuarterStartDate", "FFQuarterStartDate"])
 
 
+def test_text_stored_columns_are_typed_like_the_model():
+    class TextUpload(SqliteClient):
+        def query(self, sql, params=None, use_cache=True):
+            result = super().query(sql, params, use_cache)
+            if "LIMIT 0" in sql:  # like a CSV upload: text columns, no calculated columns
+                result.columns = [c for c in result.columns if not c.startswith(("SP_", "Enrollment", "FF"))]
+                result.column_types = ["bigint" if c == "total_shipments" else "string" for c in result.columns]
+            return result
+
+    svc = InsightAcceleratorService(TextUpload(ROWS[:5]), Settings(source_table="attruby_ia"))
+    source = svc.builder.source_from
+    assert "TRY_CAST(`new_ptnt_filled` AS DOUBLE) AS `new_ptnt_filled`" in source
+    assert "TRY_CAST(`enrollment_date` AS DATE) AS `enrollment_date`" in source
+    assert "TRY_CAST(`refresh_date` AS TIMESTAMP) AS `refresh_date`" in source
+    assert "NULLIF(`prgrm_nm`, 'null') AS `prgrm_nm`" in source
+    assert "`total_shipments`" not in source  # already numeric: left as is
+    # calculated columns are computed from the typed columns
+    assert source.startswith("(SELECT *, DATEDIFF(CURRENT_DATE(), enrollment_date) - 1")
+    assert "FROM (SELECT * EXCEPT (`src_table`, " in source and source.endswith(") AS typed) AS source")
+    assert "new_ptnt_filled" in svc.schema_info["text_columns_typed_in_backend"]
+    assert "prgrm_nm" not in svc.schema_info["text_columns_typed_in_backend"]
+
+
 def _asgi_get(app, path: str):
     """In-process GET against the ASGI app (no server, no extra dependencies)."""
     scope = {"type": "http", "asgi": {"version": "3.0"}, "http_version": "1.1", "method": "GET",

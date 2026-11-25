@@ -21,6 +21,7 @@ class QueryResult:
     rows: list[dict[str, Any]]
     fields: list[dict] = field(default_factory=list)   # display metadata per column
     meta: dict = field(default_factory=dict)
+    column_types: list[str | None] = field(default_factory=list)  # e.g. "string", "double" (not sent to clients)
 
     def as_dict(self) -> dict:
         out = {"columns": self.columns, "fields": self.fields, "rows": self.rows}
@@ -146,6 +147,7 @@ class DatabricksClient:
                 with conn.cursor() as cursor:
                     cursor.execute(sql, parameters=params or None)
                     columns = [d[0] for d in cursor.description or []]
+                    types = [str(d[1]).lower() if d[1] else None for d in cursor.description or []]
                     rows = [{c: _plain(v) for c, v in zip(columns, row)} for row in cursor.fetchall()]
             except Exception as exc:  # noqa: BLE001
                 self._discard(conn)
@@ -157,5 +159,5 @@ class DatabricksClient:
             self._release(conn)
             log.debug("%d rows in %.2fs\n%s\nparams=%s", len(rows),
                       time.perf_counter() - started, sql, params)
-            return QueryResult(columns, rows)
+            return QueryResult(columns, rows, column_types=types)
         raise DatabaseError("Query failed after retry.")  # pragma: no cover

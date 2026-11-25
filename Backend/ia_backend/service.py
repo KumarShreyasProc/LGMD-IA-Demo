@@ -55,6 +55,18 @@ FUNNEL_STAGES = [
 ]
 
 
+# A table loaded from text (e.g. a CSV upload) can store numbers and dates as strings,
+# with the literal 'null' for missing values. Such columns are converted to the type the
+# model expects, so the metric-view formulas (SUM, dates, IS NULL) behave as designed.
+_TEXT_TYPES = {"string", "varchar", "char"}
+_TEXT_FIXES = {
+    "string": "NULLIF({col}, 'null')",
+    "number": "TRY_CAST({col} AS DOUBLE)",
+    "date": "TRY_CAST({col} AS DATE)",
+    "timestamp": "TRY_CAST({col} AS TIMESTAMP)",
+}
+
+
 def _number(value: Any) -> float | None:
     return None if value is None else float(value)
 
@@ -78,27 +90,45 @@ class InsightAcceleratorService:
         return self._builder
 
     def _resolve_source(self) -> str:
-        """Inspect the table once; compute the 4 calculated columns if it lacks them."""
+        """Inspect the table once: type text-stored columns, and compute the 4
+        calculated columns if it lacks them."""
         table = self.settings.quoted_source_table
-        columns = self.client.query(f"SELECT * FROM {table} LIMIT 0", use_cache=False).columns
+        schema = self.client.query(f"SELECT * FROM {table} LIMIT 0", use_cache=False)
+        columns = schema.columns
         existing = {c.lower() for c in columns}
         to_derive = {n: e for n, e in DERIVED_SOURCE_COLUMNS.items() if n.lower() not in existing}
         available = existing | {n.lower() for n in to_derive}
         missing = sorted({d.column for d in self.model.dimensions.values()
                           if d.column.lower() not in available})
+        kinds = {d.column.lower(): d.kind for d in self.model.dimensions.values() if not d.derived}
+        text_fixes = {c: _TEXT_FIXES[kinds[c.lower()]].format(col=quote_ident(c))
+                      for c, t in zip(columns, schema.column_types)
+                      if t in _TEXT_TYPES and c.lower() in kinds}
+        retyped = sorted(c for c in text_fixes if kinds[c.lower()] != "string")
         self.schema_info = {
             "table": self.settings.source_table,
             "columns_found": len(columns),
             "computed_in_backend": sorted(to_derive),
+            "text_columns_typed_in_backend": retyped,
             "missing_columns": missing,
         }
         if missing:
             log.warning("%s is missing columns used by the model: %s",
                         self.settings.source_table, ", ".join(missing))
-        if not to_derive:
-            return f"{table} AS source"
-        extra = ", ".join(f"{expr} AS {quote_ident(name)}" for name, expr in to_derive.items())
-        return f"(SELECT *, {extra} FROM {table}) AS source"
+        if retyped:
+            log.warning("%s stores these columns as text; casting them in queries: %s",
+                        self.settings.source_table, ", ".join(retyped))
+
+        select_typed = None
+        if text_fixes:
+            names = ", ".join(quote_ident(c) for c in text_fixes)
+            fixed = ", ".join(f"{expr} AS {quote_ident(c)}" for c, expr in text_fixes.items())
+            select_typed = f"SELECT * EXCEPT ({names}), {fixed} FROM {table}"
+        if to_derive:  # computed from the typed columns
+            extra = ", ".join(f"{expr} AS {quote_ident(name)}" for name, expr in to_derive.items())
+            inner = f"({select_typed}) AS typed" if select_typed else table
+            return f"(SELECT *, {extra} FROM {inner}) AS source"
+        return f"({select_typed}) AS source" if select_typed else f"{table} AS source"
 
     def _run(self, query: SqlQuery, **meta) -> QueryResult:
         result = self.client.query(query.sql, query.params)
