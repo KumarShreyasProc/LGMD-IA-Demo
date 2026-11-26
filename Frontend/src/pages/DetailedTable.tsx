@@ -1,9 +1,8 @@
 import { useState } from 'react';
-import { DATE_FILTERS } from '../config/model';
-import {
-  api, byName, formatValue, toApiFilters, useApi, useDebounced, useFilterOptions,
-  type DateRanges, type Selections, type Value,
-} from '../data/api';
+import { DATE_FILTERS, DETAIL_FILTER_GROUPS } from '../config/model';
+import { api, byName, formatValue, useApi, useDebounced, useFilterOptions, type Value } from '../data/api';
+import { useFilters, pageFilters } from '../state/filters';
+import { AppliedFilters } from '../components/AppliedFilters';
 import { MultiSelect } from '../components/MultiSelect';
 import { DateRange } from '../components/DateRange';
 import { DataTable, downloadCsv } from '../components/DataTable';
@@ -30,12 +29,7 @@ const COLUMN_IDS = COLUMNS.map((c) => c.id);
 const DEFAULT_COLUMNS = COLUMN_IDS.slice(0, 10);
 const columnLabel = (id: string) => COLUMNS.find((c) => c.id === id)?.label ?? id;
 
-const GROUPS: { title: string; filters: string[] }[] = [
-  { title: 'Enrolling HCP', filters: ['enrolling_hcp_territory', 'enrolling_hcp_region', 'enrolling_hcp_area'] },
-  { title: 'Enrolling Payer', filters: ['enrollment_pyr_typ', 'enrollment_pbm'] },
-  { title: 'Flags', filters: ['current_status', 'initiated_therapy', 'initiated_paid_therapy', 'first_fill_shipment_type'] },
-];
-const SLICERS = GROUPS.flatMap((g) => g.filters);
+const SLICERS = DETAIL_FILTER_GROUPS.flatMap((g) => g.filters);
 
 // Total row: backend measure for each summable column.
 const TOTALS: Record<string, string> = { new_ptnt_written: 'new_patients_written', new_ptnt_filled: 'new_patients_filled' };
@@ -44,13 +38,13 @@ const ROW_LIMIT = 10_000; // backend maximum per request
 export function DetailedTable() {
   const [showFilters, setShowFilters] = useState(true);
   const [showColumns, setShowColumns] = useState(false);
-  const [selections, setSelections] = useState<Selections>({});
-  const [dates, setDates] = useState<DateRanges>({});
-  const [patientId, setPatientId] = useState('');
   const [columns, setColumns] = useState<string[]>(DEFAULT_COLUMNS);
+  const { state, update, setSelection, setDate } = useFilters();
+  const { selections, dates, patientId } = state;
 
-  const idSearch = useDebounced(patientId.trim());
-  const filters = { ...toApiFilters(selections, dates), ...(idSearch ? { crx_ptnt_id: { contains: idSearch } } : {}) };
+  // Shared filters this page has slicers for; the ID search is debounced so typing doesn't query per key.
+  const idSearch = useDebounced(patientId);
+  const { filters, applied, notApplied } = pageFilters({ ...state, patientId: idSearch }, 'detail');
   const key = JSON.stringify(filters);
   const patients = useApi(key, () => api.patients({ columns: COLUMN_IDS, filters, limit: ROW_LIMIT }));
   const totals = useApi(key, () => api.kpis(Object.values(TOTALS), filters));
@@ -64,8 +58,7 @@ export function DetailedTable() {
   const total = columns.map((c, i) =>
     i === 0 ? 'Total' : TOTALS[c] && totals.data ? formatValue(totals.data.values[TOTALS[c]], totalMeta[TOTALS[c]]) : '');
   const headers = columns.map(columnLabel);
-  const activeCount = Object.values(selections).filter((v) => v.length).length
-    + Object.values(dates).filter((r) => r.from || r.to).length + (patientId.trim() ? 1 : 0);
+  const activeCount = applied.length;
   const truncated = patients.data && patients.data.total > rows.length;
 
   return (
@@ -101,16 +94,16 @@ export function DetailedTable() {
           <Panel title="Dates" className="span-2">
             <div className="filter-grid">
               {DATE_FILTERS.map((d) => (
-                <DateRange key={d.id} label={d.label} value={dates[d.id] ?? { from: '', to: '' }} onChange={(r) => setDates({ ...dates, [d.id]: r })} />
+                <DateRange key={d.id} label={d.label} value={dates[d.id] ?? { from: '', to: '' }} onChange={(r) => setDate(d.id, r)} />
               ))}
             </div>
           </Panel>
-          {GROUPS.map((g) => (
+          {DETAIL_FILTER_GROUPS.map((g) => (
             <Panel key={g.title} title={g.title}>
               <div className="filter-grid">
                 {g.filters.map((id) => (
                   <MultiSelect key={id} label={id} options={options.data?.[id] ?? []} loading={options.loading}
-                    value={selections[id] ?? []} onChange={(v) => setSelections({ ...selections, [id]: v })} />
+                    value={selections[id] ?? []} onChange={(v) => setSelection(id, v)} />
                 ))}
               </div>
             </Panel>
@@ -118,12 +111,14 @@ export function DetailedTable() {
           <Panel title="IDs">
             <label className="slicer">
               <span className="slicer-label">crx_ptnt_id</span>
-              <input className="search" type="search" placeholder="Search patient ID" value={patientId} onChange={(e) => setPatientId(e.target.value)} />
+              <input className="search" type="search" placeholder="Search patient ID" value={patientId} onChange={(e) => update({ patientId: e.target.value })} />
             </label>
           </Panel>
           {options.error && <p className="error span-2">Couldn't load filter values: {options.error}</p>}
         </div>
       )}
+
+      <AppliedFilters applied={applied} notApplied={notApplied} />
 
       {columns.length === 0 ? (
         <section className="empty"><p><strong>No columns selected.</strong> Use “Choose columns” to add some.</p></section>

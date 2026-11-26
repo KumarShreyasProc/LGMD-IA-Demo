@@ -29,6 +29,8 @@ button { font: inherit; cursor: pointer; }
 .side nav { display: flex; flex-direction: column; gap: 22px; }
 .nav-btn { min-height: 42px; border: 0; border-radius: 10px; background: var(--nav); color: #fff; font-size: 13px; font-weight: 700; box-shadow: 0 1px 3px rgba(0,0,0,.25); }
 .nav-btn.on { background: #e6e6e6; color: var(--ink); }
+.clear-all { margin-top: 18px; min-height: 34px; border: 1px solid var(--blue); border-radius: 8px; background: #fff; color: var(--blue); font-size: 12px; font-weight: 700; }
+.clear-all:disabled { border-color: #c8c6c4; color: #8a8886; cursor: default; }
 .refresh { margin-top: auto; font-size: 11px; font-weight: 700; }
 .refresh span { font-weight: 400; }
 .main { flex: 1; min-width: 0; padding: 16px 20px 24px; }
@@ -69,6 +71,9 @@ button { font: inherit; cursor: pointer; }
 .date-range input { font: inherit; font-size: 11px; border: 1px solid var(--field); padding: 2px 4px; }
 
 .chips { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.applied { display: flex; flex-direction: column; gap: 4px; margin: 8px 0; }
+.chips-label { font-size: 12px; font-weight: 700; }
+.not-applied { margin: 0; font-size: 11.5px; }
 .chip { border: 1px solid #8ea6cc; background: #e8f1fb; color: var(--blue); border-radius: 12px; padding: 3px 10px; font-size: 11.5px; }
 .link { border: 0; background: none; color: var(--blue); text-decoration: underline; font-size: 12px; }
 
@@ -90,6 +95,15 @@ button { font: inherit; cursor: pointer; }
 .data-table tfoot td { font-weight: 700; border-top: 2px solid var(--ink); }
 .data-table .num { text-align: right; }
 .data-table tr.flag { background: #fff4ce; }
+
+/* Summary matrix (Power BI stepped layout with drill-down) */
+.matrix-tools { display: flex; gap: 14px; font-size: 12px; }
+.matrix .table-scroll { max-height: 520px; overflow: auto; }
+.matrix tfoot td { position: sticky; bottom: 0; background: #fff; }
+.matrix tr.subtotal td { font-weight: 600; }
+.drill, .drill-spacer { display: inline-block; width: 14px; height: 14px; margin-right: 6px; vertical-align: -2px; }
+.drill { padding: 0; border: 1px solid #8a8886; background: #fff; color: var(--ink); font-size: 11px; line-height: 12px; text-align: center; }
+.drill:disabled { opacity: .35; }
 .pager { display: flex; align-items: center; gap: 12px; font-size: 12px; }
 .pager button { border: 1px solid var(--field); background: #fff; padding: 3px 10px; }
 .pager button:disabled { opacity: .4; cursor: default; }

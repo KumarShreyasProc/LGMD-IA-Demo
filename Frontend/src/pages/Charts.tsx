@@ -1,21 +1,19 @@
 import { useMemo, useState, type ReactElement } from 'react';
 import { Bar, BarChart, CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
-import { measureLabel } from '../config/model';
+import { CHART_FILTERS, measureLabel } from '../config/model';
 import {
-  api, byName, formatValue, toApiFilters, useApi, useFilterOptions,
-  type ApiFilters, type DateBasis, type FieldMeta, type Loadable, type QueryResult, type Selections, type Value,
+  api, byName, formatValue, useApi, useFilterOptions,
+  type ApiFilters, type DateBasis, type FieldMeta, type Loadable, type QueryResult, type Value,
 } from '../data/api';
+import { useFilters, pageFilters } from '../state/filters';
 import { MultiSelect } from '../components/MultiSelect';
+import { AppliedFilters } from '../components/AppliedFilters';
 
 const C = { light: '#118DFF', navy: '#12239E', orange: '#E66C37', grey: '#A19F9D', pale: '#A9C9F0' };
 const STACK_COLORS = [C.navy, C.light, C.orange, C.grey, C.pale, '#6B007B', '#E044A7', '#744EC2'];
 const SECTIONS = ['Patient Access', 'Demand Volume & Shipments', 'Persistence', 'Reported Adherence', 'Net Sales', 'Patient Status'] as const;
 type Section = (typeof SECTIONS)[number];
 const LIVE_SECTIONS: Section[] = ['Patient Access', 'Demand Volume & Shipments', 'Patient Status'];
-const SLICERS = [
-  { id: 'prgrm_nm', label: 'SP/HUB Program Type (prgrm_nm)' },
-  { id: 'enrollment_pyr_typ', label: 'Enrollment Payer Type (enrollment_pyr_typ)' },
-];
 const KNOWN_SP_NOTE = 'Power BI note “Excludes Known SP”: that exclusion is not defined in the backend yet, so it is not applied.';
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -201,10 +199,10 @@ function PatientStatus({ filters }: { filters: ApiFilters }) {
 
 export function Charts() {
   const [section, setSection] = useState<Section>('Patient Access');
-  const [selections, setSelections] = useState<Selections>({});
-  const filters = toApiFilters(selections);
+  const { state, setSelection } = useFilters();
+  const { filters, applied, notApplied } = pageFilters(state, 'charts');
   const live = LIVE_SECTIONS.includes(section);
-  const options = useFilterOptions(live ? SLICERS.map((s) => s.id) : [], filters);
+  const options = useFilterOptions(live ? CHART_FILTERS.map((s) => s.id) : [], filters);
   return (
     <div className="page charts">
       <nav className="sub-tabs" aria-label="Chart sections">
@@ -214,13 +212,14 @@ export function Charts() {
       </nav>
       {live && (
         <div className="slicer-row">
-          {SLICERS.map((s) => (
+          {CHART_FILTERS.map((s) => (
             <MultiSelect key={s.id} label={s.label} options={options.data?.[s.id] ?? []} loading={options.loading}
-              value={selections[s.id] ?? []} onChange={(v) => setSelections({ ...selections, [s.id]: v })} />
+              value={state.selections[s.id] ?? []} onChange={(v) => setSelection(s.id, v)} />
           ))}
           {options.error && <p className="error">Couldn't load filter values: {options.error}</p>}
         </div>
       )}
+      {live && <AppliedFilters applied={applied} notApplied={notApplied} />}
       {section === 'Patient Access' && <PatientAccess filters={filters} />}
       {section === 'Demand Volume & Shipments' && <Demand filters={filters} />}
       {section === 'Persistence' && <Persistence />}

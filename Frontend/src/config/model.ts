@@ -126,7 +126,35 @@ export const DATE_FILTERS: FilterDef[] = [
   { id: 'first_paid_fill_date', label: 'First paid fill date' },
 ];
 
-const FILTER_LABELS = new Map([...FILTER_GROUPS.flatMap((g) => g.filters), ...DATE_FILTERS].map((f) => [f.id, f.label]));
+// Slicers on the Detailed Table View page (labels are the Power BI column names).
+export const DETAIL_FILTER_GROUPS: { title: string; filters: string[] }[] = [
+  { title: 'Enrolling HCP', filters: ['enrolling_hcp_territory', 'enrolling_hcp_region', 'enrolling_hcp_area'] },
+  { title: 'Enrolling Payer', filters: ['enrollment_pyr_typ', 'enrollment_pbm'] },
+  { title: 'Flags', filters: ['current_status', 'initiated_therapy', 'initiated_paid_therapy', 'first_fill_shipment_type'] },
+];
+
+// Slicers on the Charts page (applied to every chart in the live sections).
+export const CHART_FILTERS: FilterDef[] = [
+  { id: 'prgrm_nm', label: 'SP/HUB Program Type (prgrm_nm)' },
+  { id: 'enrollment_pyr_typ', label: 'Enrollment Payer Type (enrollment_pyr_typ)' },
+];
+
+/** Search box on the Detailed Table View page (crx_ptnt_id contains …). */
+export const PATIENT_ID_FILTER = 'crx_ptnt_id';
+
+// Filter selections are shared by all pages (like synced slicers), but each page only
+// applies the filters it has a slicer for.
+export type PageId = 'summary' | 'detail' | 'charts';
+export const PAGE_FILTERS: Record<PageId, string[]> = {
+  summary: [...FILTER_GROUPS.flatMap((g) => g.filters.map((f) => f.id)), ...DATE_FILTERS.map((d) => d.id)],
+  detail: [...DETAIL_FILTER_GROUPS.flatMap((g) => g.filters), ...DATE_FILTERS.map((d) => d.id), PATIENT_ID_FILTER],
+  charts: CHART_FILTERS.map((f) => f.id),
+};
+
+const FILTER_LABELS = new Map([
+  ...[...FILTER_GROUPS.flatMap((g) => g.filters), ...DATE_FILTERS].map((f): [string, string] => [f.id, f.label]),
+  [PATIENT_ID_FILTER, 'Patient ID'],
+]);
 
 export const fieldLabel = (id: string) => FIELDS.find((f) => f.id === id)?.label ?? id;
 export const measureLabel = (id: string) => MEASURES.find((m) => m.id === id)?.label ?? id;
