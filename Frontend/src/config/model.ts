@@ -82,29 +82,39 @@ export const FILTER_GROUPS: { id: string; label: string; filters: FilterDef[] }[
     id: 'patient',
     label: 'Patient Attributes',
     filters: [
+      { id: 'crx_ptnt_id', label: 'Crx Patient ID' },
       { id: 'initiated_therapy', label: 'Initiated Therapy (SP)' },
       { id: 'initiated_paid_therapy', label: 'Initiated Paid Therapy (SP)' },
-      { id: 'current_status', label: 'Current Status' },
       { id: 'current_sub_status', label: 'Current Sub Status' },
+      { id: 'current_status', label: 'Current Status' },
       { id: 'previous_targeted_therapy', label: 'Previous Targeted Therapy' },
+      { id: 'ltst_sp_ptnt_id', label: 'Latest SP Patient ID' },
     ],
   },
   {
     id: 'hcp',
     label: 'HCP Attributes',
     filters: [
+      { id: 'enrolling_hcp_trgt', label: 'Enrolling HCP Target Flag' },
+      { id: 'enrolling_hcp_specialty', label: 'Enrolling HCP Specialty' },
       { id: 'enrolling_hcp_territory', label: 'Enrolling HCP Territory' },
       { id: 'enrolling_hcp_region', label: 'Enrolling HCP Region' },
+      { id: 'enrolling_hcp_area', label: 'Enrolling HCP Area' },
       { id: 'enrolling_hcp_priority', label: 'Enrolling HCP Priority' },
-      { id: 'enrolling_hcp_trgt', label: 'Enrolling HCP Target' },
+      { id: 'enrollment_hcp_id', label: 'Enrollment HCP ID' },
+      { id: 'enrolling_hcp_hco', label: 'Enrolling HCP HCO' },
     ],
   },
   {
     id: 'payer',
     label: 'Payer/Pharmacy Attributes',
     filters: [
-      { id: 'enrollment_pyr_typ', label: 'Enrollment Payer Type' },
+      { id: 'enrollment_crx_pyr_id', label: 'Enrollment Crx Payer ID' },
       { id: 'enrollment_pbm', label: 'Enrollment PBM' },
+      { id: 'enrollment_pyr_nm', label: 'Enrollment Payer Name' },
+      { id: 'enrollment_plan_nm', label: 'Enrollment Plan Name' },
+      { id: 'enrollment_pyr_typ', label: 'Enrollment Payer Type' },
+      { id: 'rmh_isp_nm', label: 'Enrollment ISP Name' },
       { id: 'first_paid_sp', label: 'First Paid SP' },
     ],
   },
@@ -112,8 +122,10 @@ export const FILTER_GROUPS: { id: string; label: string; filters: FilterDef[] }[
     id: 'program',
     label: 'Program Attributes',
     filters: [
-      { id: 'prgrm_nm', label: 'SP/HUB Program Type' },
+      { id: 'prgrm_nm', label: 'Program Name' },
       { id: 'first_fill_shipment_type', label: 'First Fill Shipment Type' },
+      { id: 'last_shipment_disp_type', label: 'Last Shipment Type' },
+      { id: 'last_shipment_sp', label: 'Last Shipment SP' },
     ],
   },
   { id: 'dates', label: 'Dates', filters: [] },
@@ -139,21 +151,23 @@ export const CHART_FILTERS: FilterDef[] = [
   { id: 'enrollment_pyr_typ', label: 'Enrollment Payer Type (enrollment_pyr_typ)' },
 ];
 
-/** Search box on the Detailed Table View page (crx_ptnt_id contains …). */
+/** Patient ID column; the Detailed Table View searches it (crx_ptnt_id contains …). */
 export const PATIENT_ID_FILTER = 'crx_ptnt_id';
+/** Filter id of that search box (separate from the Crx Patient ID slicer on the Summary page). */
+export const PATIENT_SEARCH = 'patient_id_search';
 
 // Filter selections are shared by all pages (like synced slicers), but each page only
 // applies the filters it has a slicer for.
 export type PageId = 'summary' | 'detail' | 'charts';
 export const PAGE_FILTERS: Record<PageId, string[]> = {
   summary: [...FILTER_GROUPS.flatMap((g) => g.filters.map((f) => f.id)), ...DATE_FILTERS.map((d) => d.id)],
-  detail: [...DETAIL_FILTER_GROUPS.flatMap((g) => g.filters), ...DATE_FILTERS.map((d) => d.id), PATIENT_ID_FILTER],
+  detail: [...DETAIL_FILTER_GROUPS.flatMap((g) => g.filters), ...DATE_FILTERS.map((d) => d.id), PATIENT_SEARCH],
   charts: CHART_FILTERS.map((f) => f.id),
 };
 
 const FILTER_LABELS = new Map([
   ...[...FILTER_GROUPS.flatMap((g) => g.filters), ...DATE_FILTERS].map((f): [string, string] => [f.id, f.label]),
-  [PATIENT_ID_FILTER, 'Patient ID'],
+  [PATIENT_SEARCH, 'Patient ID search'],
 ]);
 
 export const fieldLabel = (id: string) => FIELDS.find((f) => f.id === id)?.label ?? id;

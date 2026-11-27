@@ -151,6 +151,19 @@ export function useFilterOptions(dimensions: string[], filters: ApiFilters) {
   return useApi(key, () => api.filterOptions(dimensions, filters));
 }
 
+/**
+ * Server-side slicer search: values of `dim` containing the typed text, under the other active
+ * filters. Used for slicers with more values than /api/filter-options returns (e.g. patient IDs).
+ */
+export function slicerSearch(dim: string, filters: ApiFilters) {
+  const others = Object.fromEntries(Object.entries(filters).filter(([k]) => k !== dim));
+  return {
+    key: JSON.stringify([dim, others]),
+    load: (text: string) => api.query({ measures: [], dimensions: [dim], filters: { ...others, [dim]: { contains: text } }, order_by: [dim], limit: 200 })
+      .then((r) => r.rows.map((row) => row[dim] ?? null)),
+  };
+}
+
 let metaRequest: Promise<Meta> | null = null;
 /** /api/meta never changes while the app runs: load it once and share it (retried after a failure). */
 export function loadMeta(): Promise<Meta> {

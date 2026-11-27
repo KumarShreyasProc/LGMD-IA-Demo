@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { DATE_FILTERS, FIELDS, FILTER_GROUPS, MEASURES, SOURCES } from '../config/model';
-import { useFilterOptions, type ApiFilters, type DateRange as Range } from '../data/api';
+import { slicerSearch, useFilterOptions, type ApiFilters, type DateRange as Range } from '../data/api';
 import { useFilters, pageFilters } from '../state/filters';
 import { MultiSelect } from '../components/MultiSelect';
 import { DateRange } from '../components/DateRange';
@@ -126,7 +126,7 @@ export function Summary() {
                   ))
                 : group.filters.map((f) => (
                     <MultiSelect key={f.id} label={f.label} options={options.data?.[f.id] ?? []} loading={options.loading}
-                      value={selections[f.id] ?? []} onChange={(v) => setSelection(f.id, v)} />
+                      value={selections[f.id] ?? []} onChange={(v) => setSelection(f.id, v)} search={slicerSearch(f.id, filters)} />
                   ))}
             </div>
             {options.error && <p className="error pad">Couldn't load filter values: {options.error}</p>}

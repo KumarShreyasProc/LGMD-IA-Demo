@@ -2,7 +2,7 @@
 // saved in localStorage so it survives page switches, refreshes and reopening the app.
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import {
-  DATE_FILTERS, FIELDS, MEASURES, PAGE_FILTERS, PATIENT_ID_FILTER, SOURCES, filterLabel,
+  DATE_FILTERS, FIELDS, MEASURES, PAGE_FILTERS, PATIENT_ID_FILTER, PATIENT_SEARCH, SOURCES, filterLabel,
   type PageId, type SourceId,
 } from '../config/model';
 import {
@@ -35,7 +35,7 @@ const STORAGE_KEY = 'insights-accelerator.filters.v1';
 const OPTION_LIMIT = 500; // /api/filter-options default; a full list can't prove a value is gone
 const DATE_IDS = new Set(DATE_FILTERS.map((d) => d.id));
 const SELECTION_IDS = new Set(
-  Object.values(PAGE_FILTERS).flat().filter((id) => !DATE_IDS.has(id) && id !== PATIENT_ID_FILTER),
+  Object.values(PAGE_FILTERS).flat().filter((id) => !DATE_IDS.has(id) && id !== PATIENT_SEARCH),
 );
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -174,7 +174,7 @@ export function FilterProvider({ children }: { children: ReactNode }) {
       setSelection,
       setDate,
       clearFilter: (id) => {
-        if (id === PATIENT_ID_FILTER) setState((s) => ({ ...s, patientId: '' }));
+        if (id === PATIENT_SEARCH) setState((s) => ({ ...s, patientId: '' }));
         else if (DATE_IDS.has(id)) setDate(id, { from: '', to: '' });
         else setSelection(id, []);
       },
@@ -205,7 +205,7 @@ function activeFilters(state: FilterState): ActiveFilter[] {
   return [
     ...Object.entries(state.selections).map(([id, v]) => ({ id, label: label(id), text: v.map((x) => formatValue(x)).join(', ') })),
     ...Object.entries(state.dates).map(([id, r]) => ({ id, label: label(id), text: `${r.from || '…'} to ${r.to || '…'}` })),
-    ...(state.patientId.trim() ? [{ id: PATIENT_ID_FILTER, label: label(PATIENT_ID_FILTER), text: `contains “${state.patientId.trim()}”` }] : []),
+    ...(state.patientId.trim() ? [{ id: PATIENT_SEARCH, label: label(PATIENT_SEARCH), text: `contains “${state.patientId.trim()}”` }] : []),
   ];
 }
 
@@ -216,7 +216,7 @@ function activeFilters(state: FilterState): ActiveFilter[] {
 export function pageFilters(state: FilterState, page: PageId) {
   const ids = new Set(PAGE_FILTERS[page]);
   const pick = <T,>(obj: Record<string, T>) => Object.fromEntries(Object.entries(obj).filter(([id]) => ids.has(id)));
-  const patientId = ids.has(PATIENT_ID_FILTER) ? state.patientId.trim() : '';
+  const patientId = ids.has(PATIENT_SEARCH) ? state.patientId.trim() : '';
   const filters: ApiFilters = {
     ...toApiFilters(pick(state.selections), pick(state.dates)),
     ...(patientId ? { [PATIENT_ID_FILTER]: { contains: patientId } } : {}),

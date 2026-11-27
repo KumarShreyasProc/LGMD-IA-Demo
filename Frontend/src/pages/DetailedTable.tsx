@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { DATE_FILTERS, DETAIL_FILTER_GROUPS } from '../config/model';
-import { api, byName, formatValue, useApi, useDebounced, useFilterOptions, type Value } from '../data/api';
+import { api, byName, formatValue, slicerSearch, useApi, useDebounced, useFilterOptions, type Value } from '../data/api';
 import { useFilters, pageFilters } from '../state/filters';
 import { AppliedFilters } from '../components/AppliedFilters';
 import { MultiSelect } from '../components/MultiSelect';
@@ -103,7 +103,7 @@ export function DetailedTable() {
               <div className="filter-grid">
                 {g.filters.map((id) => (
                   <MultiSelect key={id} label={id} options={options.data?.[id] ?? []} loading={options.loading}
-                    value={selections[id] ?? []} onChange={(v) => setSelection(id, v)} />
+                    value={selections[id] ?? []} onChange={(v) => setSelection(id, v)} search={slicerSearch(id, filters)} />
                 ))}
               </div>
             </Panel>
