@@ -24,7 +24,8 @@ export interface QueryResult { columns: string[]; fields: FieldMeta[]; rows: Row
 export interface KpiResult { values: Row; fields: FieldMeta[] }
 export interface PatientsResult extends QueryResult { total: number; limit: number; offset: number }
 export interface MeasureMeta { name: string; label: string; description: string; format: string; decimals: number }
-export interface Meta { measures: MeasureMeta[] }
+export interface DimensionMeta { name: string; label: string; kind: string; derived: boolean }
+export interface Meta { measures: MeasureMeta[]; dimensions: DimensionMeta[] }
 export type DateBasis = 'enrollment' | 'first_fill' | 'first_not_ft' | 'first_paid' | 'status_change';
 
 async function request<T>(path: string, body?: unknown): Promise<T> {
@@ -114,6 +115,14 @@ export function useFilterOptions(dimensions: string[], filters: ApiFilters) {
   const key = dimensions.length ? JSON.stringify(['filter-options', dimensions, filters]) : null;
   return useApi(key, () => api.filterOptions(dimensions, filters));
 }
+
+let metaRequest: Promise<Meta> | null = null;
+/** /api/meta never changes while the app runs: load it once and share it (retried after a failure). */
+export function loadMeta(): Promise<Meta> {
+  metaRequest ??= api.meta().catch((err) => { metaRequest = null; throw err; });
+  return metaRequest;
+}
+export const useMeta = () => useApi('meta', loadMeta);
 
 export function useDebounced<T>(value: T, ms = 300): T {
   const [debounced, setDebounced] = useState(value);

@@ -9,6 +9,7 @@ import {
   api, formatValue, toApiFilters,
   type ApiFilters, type DateRange, type DateRanges, type Selections, type Value,
 } from '../data/api';
+import { parseVisual, type VisualConfig } from '../visuals/config';
 
 export interface FilterState {
   sources: SourceId[];     // Summary "Select Source"
@@ -17,6 +18,7 @@ export interface FilterState {
   selections: Selections;  // slicer values by dimension
   dates: DateRanges;       // date ranges by date column
   patientId: string;       // Detailed Table View patient ID search
+  visuals: Record<string, VisualConfig>; // "Personalize this visual" overrides, by visual id
 }
 
 export const DEFAULT_STATE: FilterState = {
@@ -26,6 +28,7 @@ export const DEFAULT_STATE: FilterState = {
   selections: {},
   dates: {},
   patientId: '',
+  visuals: {},
 };
 
 const STORAGE_KEY = 'insights-accelerator.filters.v1';
@@ -73,7 +76,18 @@ function sanitize(raw: unknown): FilterState {
     selections,
     dates,
     patientId: typeof raw.patientId === 'string' ? raw.patientId.slice(0, 200) : '',
+    visuals: parseVisuals(raw.visuals),
   };
+}
+
+function parseVisuals(raw: unknown): Record<string, VisualConfig> {
+  const out: Record<string, VisualConfig> = {};
+  if (!isRecord(raw)) return out;
+  for (const [id, value] of Object.entries(raw)) {
+    const config = id.length <= 64 ? parseVisual(value) : null;
+    if (config) out[id] = config;
+  }
+  return out;
 }
 
 function load(): FilterState {
@@ -112,6 +126,7 @@ interface Store {
   update: (patch: Partial<FilterState>) => void;
   setSelection: (id: string, values: Value[]) => void;
   setDate: (id: string, range: DateRange) => void;
+  setVisual: (id: string, config: VisualConfig | null) => void; // null = reset to default
   clearFilter: (id: string) => void;
   clearAll: () => void;
   isDefault: boolean;
@@ -154,8 +169,13 @@ export function FilterProvider({ children }: { children: ReactNode }) {
         else if (DATE_IDS.has(id)) setDate(id, { from: '', to: '' });
         else setSelection(id, []);
       },
-      clearAll: () => setState(DEFAULT_STATE),
-      isDefault: JSON.stringify(state) === JSON.stringify(DEFAULT_STATE),
+      setVisual: (id, config) => setState((s) => {
+        const { [id]: _, ...rest } = s.visuals;
+        return { ...s, visuals: config ? { ...rest, [id]: config } : rest };
+      }),
+      // Personalized visuals are not filters: they keep their own "Reset to default".
+      clearAll: () => setState((s) => ({ ...DEFAULT_STATE, visuals: s.visuals })),
+      isDefault: JSON.stringify({ ...state, visuals: {} }) === JSON.stringify(DEFAULT_STATE),
     };
   }, [state]);
 

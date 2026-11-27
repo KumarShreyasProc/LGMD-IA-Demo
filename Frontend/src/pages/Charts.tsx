@@ -9,7 +9,13 @@ import {
 } from '../data/api';
 import { useFilters, pageFilters } from '../state/filters';
 import { MultiSelect } from '../components/MultiSelect';
+import { CARD_BG, INK, OTHER_COLOR, SERIES } from '../config/palette';
 import { AppliedFilters } from '../components/AppliedFilters';
+import { downloadCsv } from '../components/DataTable';
+import { isChart, type VisualConfig } from '../visuals/config';
+import { usePersonalizedVisual, visualCsv } from '../visuals/data';
+import { VisualBody } from '../visuals/VisualBody';
+import { PersonalizeButton, PersonalizePanel } from '../visuals/PersonalizePanel';
 
 const C = { light: '#118DFF', navy: '#12239E', orange: '#E66C37', grey: '#A19F9D', pale: '#A9C9F0' };
 const STACK_COLORS = [C.navy, C.light, C.orange, C.grey, C.pale, '#6B007B', '#E044A7', '#744EC2'];
@@ -44,19 +50,52 @@ const axis = { fontSize: 11, fill: '#605E5C' };
 const tooltip = (fields: Record<string, FieldMeta> = {}) =>
   (value: unknown, _name: unknown, item: { dataKey?: unknown }) => formatValue(value as Value, fields[String(item.dataKey)]);
 
-function ChartCard({ title, note, state, children }: { title: string; note?: string; state: Loadable<{ rows: unknown[] }>; children: ReactElement }) {
+/**
+ * "Personalize this visual" for a chart: `defaults` describes the designed chart as a visual config
+ * (the starting point in the panel), `filters` includes any filter the chart always applies, and
+ * `scope` says so while the chart is personalized.
+ */
+interface Personalize { id: string; defaults: VisualConfig; filters: ApiFilters; scope?: string }
+const NO_FILTERS: ApiFilters = {};
+const month = (basis: DateBasis) => `${basis}_by_month`;
+
+function ChartCard({ title, note, state, children, personalize }: {
+  title: string; note?: string; state: Loadable<{ rows: unknown[] }>; children: ReactElement; personalize?: Personalize;
+}) {
+  const [open, setOpen] = useState(false);
+  const visual = usePersonalizedVisual(personalize?.id ?? null, personalize?.defaults ?? null, personalize?.filters ?? NO_FILTERS, false);
+  const custom = visual.override; // personalized: drawn from /api/query instead of the designed chart
   const message = state.loading ? 'Loading…'
     : state.error ? `Couldn't load data: ${state.error}`
     : !state.data?.rows.length ? 'No data for these filters.'
     : null;
+  const exportCsv = () => {
+    if (!visual.data.data) return;
+    const csv = visualCsv(visual.data.data, visual.label);
+    downloadCsv(`${personalize!.id}.csv`, csv.header, csv.rows);
+  };
   return (
     <section className="chart-card">
-      <h3>{title}</h3>
-      {note && <p className="muted">{note}</p>}
-      <div className="chart-area">
-        {message ? <p className={`chart-msg ${state.error ? 'error' : ''}`}>{message}</p>
-          : <ResponsiveContainer width="100%" height="100%">{children}</ResponsiveContainer>}
+      <div className="card-head">
+        <h3>{custom ? visual.title : title}</h3>
+        {custom && <span className="tag personalized">Personalized</span>}
+        {custom && <button type="button" className="link" disabled={!visual.data.data?.leaf.length} onClick={exportCsv}>Export CSV</button>}
+        {personalize && <PersonalizeButton open={open} onClick={() => setOpen(!open)} />}
       </div>
+      {custom ? personalize?.scope && <p className="muted">{personalize.scope}</p> : note && <p className="muted">{note}</p>}
+      {custom ? (
+        <div className={isChart(custom.type) ? 'chart-area' : 'chart-free'}>
+          {visual.data.loading ? <p className="chart-msg">Loading…</p>
+            : visual.data.error ? <p className="chart-msg error">Couldn't load data: {visual.data.error}</p>
+            : visual.data.data && <VisualBody data={visual.data.data} label={visual.label} />}
+        </div>
+      ) : (
+        <div className="chart-area">
+          {message ? <p className={`chart-msg ${state.error ? 'error' : ''}`}>{message}</p>
+            : <ResponsiveContainer width="100%" height="100%">{children}</ResponsiveContainer>}
+        </div>
+      )}
+      {open && <PersonalizePanel visual={visual} onClose={() => setOpen(false)} />}
     </section>
   );
 }
@@ -82,19 +121,25 @@ function PatientAccess({ filters }: { filters: ApiFilters }) {
     <>
       <h2 className="section-heading">Patient Access Metrics</h2>
       <div className="chart-grid">
-        <ChartCard title="SP/HUB Patients Initiating Therapy by Enrollment Month" note={KNOWN_SP_NOTE} state={init}>
+        <ChartCard title="SP/HUB Patients Initiating Therapy by Enrollment Month" note={KNOWN_SP_NOTE} state={init}
+          personalize={{ id: 'charts-initiating-therapy', filters, defaults: { type: 'clustered-column', rows: ['enrollment_by_month'], columns: null, values: ['pct_initiate_therapy'] } }}>
           <BarChart data={init.data?.rows}><CartesianGrid vertical={false} stroke="#EDEDED" /><XAxis dataKey="label" tick={axis} /><YAxis tick={axis} tickFormatter={pctTick} domain={[0, 1]} /><Tooltip formatter={tooltip(init.data?.fields)} />
             <Bar dataKey="pct_initiate_therapy" name={measureLabel('pct_initiate_therapy')} fill={C.light} /></BarChart>
         </ChartCard>
         <FreeTrialProgression state={ft} />
-        <ChartCard title="SP/HUB Patients – progression to SP shipments" note={KNOWN_SP_NOTE} state={prog}>
+        <ChartCard title="SP/HUB Patients – progression to SP shipments" note={KNOWN_SP_NOTE} state={prog}
+          personalize={{ id: 'charts-progression', filters, defaults: { type: 'line', rows: ['enrollment_by_month'], columns: null, values: ['pct_initiate_therapy', 'pct_initiate_sp', 'pct_initiate_paid'] } }}>
           <LineChart data={prog.data?.rows}><CartesianGrid vertical={false} stroke="#EDEDED" /><XAxis dataKey="label" tick={axis} /><YAxis tick={axis} tickFormatter={pctTick} domain={[0, 1]} /><Tooltip formatter={tooltip(prog.data?.fields)} /><Legend wrapperStyle={{ fontSize: 11 }} />
             <Line dataKey="pct_initiate_therapy" name="%_Initiate_Therapy" stroke={C.light} strokeWidth={2} dot={false} />
             <Line dataKey="pct_initiate_sp" name="%_Initiate_SP" stroke={C.navy} strokeWidth={2} dot={false} />
             <Line dataKey="pct_initiate_paid" name="%_Initiate_Paid" stroke={C.orange} strokeWidth={2} dot={false} /></LineChart>
         </ChartCard>
         <ChartCard title="% of SP/HUB Patients Initiating SP Therapy within 60 days of Enrollment"
-          note={`Free Trial excluded; enrollments at least 60 days old (SP_Start_60d_include_rule = 1). ${KNOWN_SP_NOTE}`} state={sixty}>
+          note={`Free Trial excluded; enrollments at least 60 days old (SP_Start_60d_include_rule = 1). ${KNOWN_SP_NOTE}`} state={sixty}
+          personalize={{
+            id: 'charts-sp-60-days', filters: { ...filters, SP_Start_60d_include_rule: [1] }, scope: 'Enrollments at least 60 days old (SP_Start_60d_include_rule = 1).',
+            defaults: { type: 'clustered-column', rows: ['enrollment_by_month'], columns: null, values: ['pct_initiate_sp_excludes_ft', 'pct_initiate_paid_exclude_ft'] },
+          }}>
           <BarChart data={sixty.data?.rows}><CartesianGrid vertical={false} stroke="#EDEDED" /><XAxis dataKey="label" tick={axis} /><YAxis tick={axis} tickFormatter={pctTick} domain={[0, 1]} /><Tooltip formatter={tooltip(sixty.data?.fields)} /><Legend wrapperStyle={{ fontSize: 11 }} />
             <Bar dataKey="pct_initiate_sp_excludes_ft" name="%_Initiate_SP_Excludes_FT" fill={C.light} />
             <Bar dataKey="pct_initiate_paid_exclude_ft" name="%_Initiate_Paid_Exclude_FT" fill={C.navy} /></BarChart>
@@ -128,7 +173,8 @@ function Demand({ filters }: { filters: ApiFilters }) {
         {sel.onDrug ? (
           <PatientsOnDrugChart title={`${sel.title} – Monthly`} note={note} filters={filters} />
         ) : sel.measure ? (
-          <ChartCard title={`${sel.title} – Monthly`} note={note} state={data}>
+          <ChartCard title={`${sel.title} – Monthly`} note={note} state={data}
+            personalize={{ id: `charts-demand-${sel.id}`, filters, defaults: { type: 'clustered-column', rows: [month(sel.basis ?? 'enrollment')], columns: null, values: [sel.measure] } }}>
             <BarChart data={data.data?.rows}><CartesianGrid vertical={false} stroke="#EDEDED" /><XAxis dataKey="label" tick={axis} /><YAxis tick={axis} /><Tooltip formatter={tooltip(data.data?.fields)} />
               <Bar dataKey={sel.measure} name={sel.label} fill={C.light} /></BarChart>
           </ChartCard>
@@ -190,7 +236,8 @@ function PatientStatus({ filters }: { filters: ApiFilters }) {
   const written = byName(res.data?.fields).new_patients_written;
   return (
     <div className="chart-grid one">
-      <ChartCard title="NBRx by Status – Monthly" note="New patients written by enrollment month, split by current status" state={{ ...res, data: res.data && { rows } }}>
+      <ChartCard title="NBRx by Status – Monthly" note="New patients written by enrollment month, split by current status" state={{ ...res, data: res.data && { rows } }}
+        personalize={{ id: 'charts-nbrx-status', filters, defaults: { type: 'stacked-column', rows: ['enrollment_by_month'], columns: 'current_status', values: ['new_patients_written'] } }}>
         <BarChart data={rows}><CartesianGrid vertical={false} stroke="#EDEDED" /><XAxis dataKey="label" tick={axis} /><YAxis tick={axis} /><Tooltip formatter={(v) => formatValue(v as Value, written)} /><Legend wrapperStyle={{ fontSize: 11 }} />
           {statuses.map((s, i) => (
             <Bar key={s} dataKey={(row: ChartRow) => row[s] ?? null} name={s} stackId="s" fill={STACK_COLORS[i % STACK_COLORS.length]} />
@@ -201,11 +248,6 @@ function PatientStatus({ filters }: { filters: ApiFilters }) {
 }
 
 // ---- Charts built from attruby_ia's patient timeline (first fill, status, specialty) ---------------- //
-// Validated categorical palette (colorblind-checked), assigned to each entity in a fixed order.
-const SERIES = ['#257de0', '#f47230', '#00b894', '#f2a600', '#ee7fac', '#008a17', '#6a4ce2', '#ec4647'];
-const OTHER_COLOR = '#8a8886';
-const CARD_BG = '#f7fafe'; // stroke between stacked segments / adjacent bars
-const INK = '#252423';
 const legendText = (value: string) => <span style={{ color: INK }}>{value}</span>;
 const pctTickFine = (v: number) => `${(v * 100).toFixed(Math.abs(v) < 0.1 && v !== 0 ? 1 : 0)}%`;
 const pct1 = new Intl.NumberFormat(undefined, { style: 'percent', minimumFractionDigits: 1, maximumFractionDigits: 1 });
@@ -421,13 +463,15 @@ function NewPatientsWritten({ filters }: { filters: ApiFilters }) {
         The Power BI “NPW Group” slicer is not shown: attruby_ia has no NPW Group column.
       </p>
       <div className="chart-grid">
-        <ChartCard title="Monthly Share" note="New patients written by enrollment month, share by Enrollment Source" state={share}>
+        <ChartCard title="Monthly Share" note="New patients written by enrollment month, share by Enrollment Source" state={share}
+          personalize={{ id: 'charts-npw-monthly-share', filters, defaults: { type: 'stacked-column', rows: ['enrollment_by_month'], columns: SOURCE_FIELD, values: ['new_patients_written'] } }}>
           <BarChart data={share.data?.rows} stackOffset="expand"><CartesianGrid vertical={false} stroke="#EDEDED" /><XAxis dataKey="label" tick={axis} /><YAxis tick={axis} tickFormatter={pctTick} /><Tooltip formatter={countAndShare} /><Legend wrapperStyle={{ fontSize: 11 }} formatter={legendText} />
             {share.data?.series.names.map((s) => (
               <Bar key={s} dataKey={(row: ChartRow) => row[s] ?? 0} name={s} stackId="share" fill={share.data!.series.color[s]} stroke={CARD_BG} />
             ))}</BarChart>
         </ChartCard>
-        <ChartCard title="LTD Share" note="Life-to-date new patients written by Enrollment Source" state={total}>
+        <ChartCard title="LTD Share" note="Life-to-date new patients written by Enrollment Source" state={total}
+          personalize={{ id: 'charts-npw-ltd', filters, defaults: { type: 'clustered-bar', rows: [SOURCE_FIELD], columns: null, values: ['new_patients_written'] } }}>
           <BarChart data={total.data?.rows} layout="vertical" margin={{ right: 90 }}><XAxis type="number" hide /><YAxis type="category" dataKey="name" tick={axis} width={120} />
             <Tooltip formatter={(v: unknown, _n: unknown, item: { payload?: { share: number } }) => `${whole.format(Number(v))} (${pct1.format(item.payload?.share ?? 0)})`} />
             <Bar dataKey="value" name="New patients written" radius={[0, 4, 4, 0]}>
@@ -437,7 +481,8 @@ function NewPatientsWritten({ filters }: { filters: ApiFilters }) {
         </ChartCard>
       </div>
       <div className="chart-grid one">
-        <ChartCard title="Weekly Enrollment Trend" note="Sum of new_ptnt_filled by enrollment week ending, by Enrollment Source (as in the Power BI visual)" state={trend}>
+        <ChartCard title="Weekly Enrollment Trend" note="Sum of new_ptnt_filled by enrollment week ending, by Enrollment Source (as in the Power BI visual)" state={trend}
+          personalize={{ id: 'charts-npw-weekly', filters, defaults: { type: 'stacked-column', rows: ['enrollment_by_week'], columns: SOURCE_FIELD, values: ['new_patients_filled'] } }}>
           <BarChart data={trend.data?.rows}><CartesianGrid vertical={false} stroke="#EDEDED" /><XAxis dataKey="label" tick={axis} /><YAxis tick={axis} /><Tooltip formatter={countAndShare} /><Legend wrapperStyle={{ fontSize: 11 }} formatter={legendText} />
             {trend.data?.series.names.map((s) => (
               <Bar key={s} dataKey={(row: ChartRow) => row[s] ?? 0} name={s} stackId="week" fill={trend.data!.series.color[s]} stroke={CARD_BG} />

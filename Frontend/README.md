@@ -23,6 +23,15 @@ backend serves the built app at the root URL of the Databricks App.
   in the data are dropped. Each page applies only the filters it has slicers for
   (`PAGE_FILTERS` in `model.ts`) and lists the others as "Saved, not used on this page".
   "Clear all filters" in the sidebar resets everything to the defaults.
+- "Personalize this visual" (the chart-with-pencil icon on the Summary visual and on the
+  charts that read `/api/query`) opens a side panel: visualization type, Rows, Columns and
+  Values from `/api/meta`. `src/visuals/` loads the data with one `/api/query` per grouping:
+  rows + columns, rows only (row totals and matrix subtotals), columns only (column totals,
+  top 25 matrix columns / 8 chart series) and no dimensions (grand total), so percentage
+  totals are never summed or averaged. Personalizations are saved with the shared state
+  (`visuals`); "Reset to default" removes one, and "Clear all filters" leaves them alone.
+  Export CSV exports what the visual shows. The patients-on-drug charts and the Free Trial
+  progression chart use their own endpoints or layout and are not personalizable.
 - The chart/table titles and "Filters Applied On" labels (Power BI `Chart Title`,
   `Filters_In_Use`, `DateFilters_In_Use`) are built from that shared state.
 

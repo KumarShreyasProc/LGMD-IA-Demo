@@ -1,21 +1,24 @@
 import { useMemo, useState } from 'react';
-import { DATE_FILTERS, FIELDS, FILTER_GROUPS, MEASURES, SOURCES, fieldLabel, measureLabel } from '../config/model';
-import { api, byName, formatValue, useApi, useFilterOptions, type DateRange as Range, type Value } from '../data/api';
+import { DATE_FILTERS, FIELDS, FILTER_GROUPS, MEASURES, SOURCES } from '../config/model';
+import { useFilterOptions, type DateRange as Range } from '../data/api';
 import { useFilters, pageFilters } from '../state/filters';
 import { MultiSelect } from '../components/MultiSelect';
 import { DateRange } from '../components/DateRange';
 import { downloadCsv } from '../components/DataTable';
-import { Matrix } from '../components/Matrix';
 import { AppliedFilters } from '../components/AppliedFilters';
+import { isChart, type VisualConfig } from '../visuals/config';
+import { usePersonalizedVisual, visualCsv } from '../visuals/data';
+import { VisualBody } from '../visuals/VisualBody';
+import { PersonalizeButton, PersonalizePanel } from '../visuals/PersonalizePanel';
 
 const EMPTY_RANGE: Range = { from: '', to: '' };
-const ROW_LIMIT = 5000; // per hierarchy level
 
 export function Summary() {
   const { state, update, setSelection, setDate } = useFilters();
   const { sources, fields, measures, selections, dates } = state;
   const [fieldSearch, setFieldSearch] = useState('');
   const [activeGroup, setActiveGroup] = useState<string | null>('patient');
+  const [personalizing, setPersonalizing] = useState(false);
 
   // ── Conditional visibility: what can be picked depends on the selected sources ──
   const visibleFields = useMemo(
@@ -39,14 +42,12 @@ export function Summary() {
   const applied = patientFiltersAvailable ? page.applied : [];
   const notApplied = patientFiltersAvailable ? page.notApplied : [...page.applied, ...page.notApplied];
 
-  // Matrix hierarchy follows the order fields were checked. One query per level (fields 1..k), so every
-  // subtotal, including ratios, is computed by the backend like a Power BI matrix.
-  const levelRequests = activeFields.map((_, i) => ({
-    measures: activeMeasures, dimensions: activeFields.slice(0, i + 1), filters, order_by: [`-${activeMeasures[0]}`], limit: ROW_LIMIT,
-  }));
-  const key = ready ? JSON.stringify(levelRequests) : null;
-  const table = useApi(key, () => Promise.all(levelRequests.map((r) => api.query(r))));
-  const totals = useApi(key, () => api.kpis(activeMeasures, filters)); // ratio totals need the backend, not a sum of rows
+  // Default view: a matrix of the checked fields (hierarchy in the order they were checked) and measures.
+  // "Personalize this visual" can replace it; every subtotal and total, including ratios, comes from the backend.
+  const defaults: VisualConfig | null = ready ? { type: 'matrix', rows: activeFields, columns: null, values: activeMeasures } : null;
+  const visual = usePersonalizedVisual('summary', defaults, filters, true);
+  const config = patientFiltersAvailable ? visual.config : null;
+  const table = visual.data;
 
   const group = FILTER_GROUPS.find((g) => g.id === activeGroup);
   const options = useFilterOptions(patientFiltersAvailable && group ? group.filters.map((f) => f.id) : [], filters);
@@ -54,23 +55,14 @@ export function Summary() {
   const toggle = (list: string[], id: string) => (list.includes(id) ? list.filter((x) => x !== id) : [...list, id]);
 
   // Replaces the Power BI "Chart Title" / "Filters_In_Use" / "DateFilters_In_Use" measures.
-  const title = ready
-    ? `${activeMeasures.map(measureLabel).join(', ')} by ${activeFields.map(fieldLabel).join(', ')} | Filters Applied On: ${
-        applied.map((f) => f.label).join('; ') || 'none'}`
-    : '';
+  const title = config ? `${visual.title} | Filters Applied On: ${applied.map((f) => f.label).join('; ') || 'none'}` : '';
 
-  const levels = table.data?.map((r) => r.rows) ?? [];
-  const leaf = table.data?.[table.data.length - 1];
-  const meta = byName(leaf?.fields);
-  const format = (v: Value, name: string) => formatValue(v, meta[name]);
-  const truncated = levels.some((rows) => rows.length === ROW_LIMIT);
-  const totalMeta = byName(totals.data?.fields);
-  const totalRow = totals.data ? activeMeasures.map((m) => formatValue(totals.data!.values[m], totalMeta[m])) : undefined;
-
-  // CSV export: the most detailed level, one column per field (like Power BI's "Export data").
-  const names = [...activeFields, ...activeMeasures];
-  const exportCsv = () => downloadCsv('insights-summary.csv', [...activeFields.map(fieldLabel), ...activeMeasures.map(measureLabel)],
-    (leaf?.rows ?? []).map((r) => names.map((n) => format(r[n] ?? null, n))));
+  // CSV export: exactly what the visual shows (flat table, matrix's most detailed level, or chart data).
+  const exportCsv = () => {
+    if (!table.data) return;
+    const csv = visualCsv(table.data, visual.label);
+    downloadCsv('insights-summary.csv', csv.header, csv.rows);
+  };
 
   return (
     <div className="page summary">
@@ -148,22 +140,27 @@ export function Summary() {
 
       <AppliedFilters applied={applied} notApplied={notApplied} />
 
-      {ready ? (
+      {personalizing && <PersonalizePanel visual={visual} onClose={() => setPersonalizing(false)} />}
+      {config ? (
         <section className="results">
           <div className="results-bar">
             <span>{title}</span>
-            <button type="button" className="export" disabled={!leaf?.rows.length} onClick={exportCsv}>Export CSV</button>
+            {visual.override && <span className="tag personalized">Personalized</span>}
+            <button type="button" className="export" disabled={!table.data?.leaf.length} onClick={exportCsv}>Export CSV</button>
+            <PersonalizeButton open={personalizing} onClick={() => setPersonalizing(!personalizing)} />
           </div>
+          {visual.override && (
+            <p className="muted">
+              This visual is personalized; the Select Fields and Select Measures lists apply again after{' '}
+              <button type="button" className="link" onClick={visual.reset}>Reset to default</button>.
+            </p>
+          )}
           {table.loading ? <p className="muted pad">Loading…</p>
             : table.error ? <p className="error pad">Couldn't load results: {table.error}</p>
-            : !levels[0]?.length ? <p className="muted pad">No rows match these filters.</p>
-            : (
-              <>
-                <Matrix key={key} fields={activeFields} fieldLabels={activeFields.map(fieldLabel)} measures={activeMeasures}
-                  measureLabels={activeMeasures.map(measureLabel)} levels={levels} format={format} total={totalRow} />
-                {truncated && <p className="muted">Some levels have more than {ROW_LIMIT.toLocaleString()} rows; only the largest are shown. Add filters to narrow it down.</p>}
-                {totals.error && <p className="error">Couldn't load totals: {totals.error}</p>}
-              </>
+            : table.data && (
+              <div className={isChart(table.data.config.type) ? 'visual-frame' : ''}>
+                <VisualBody data={table.data} label={visual.label} />
+              </div>
             )}
         </section>
       ) : (
@@ -172,6 +169,13 @@ export function Summary() {
             <>
               <p><strong>Pick at least one field and one measure</strong> to build a table.</p>
               <p className="muted">For example: Enrolling HCP Territory + New patients filled.</p>
+              {visual.saved && (
+                <p className="muted">
+                  This visual is personalized but needs at least one row field and one value.{' '}
+                  <button type="button" className="link" onClick={() => setPersonalizing(true)}>Personalize</button>{' '}
+                  <button type="button" className="link" onClick={visual.reset}>Reset to default</button>
+                </p>
+              )}
             </>
           ) : (
             <p><strong>3PL and ATU Survey data are not available yet.</strong> Select SP/HUB to build a table.</p>
