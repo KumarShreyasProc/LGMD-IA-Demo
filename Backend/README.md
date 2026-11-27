@@ -63,6 +63,17 @@ All ratios return `null` when written = 0, like the metric view. Added for the
 app (not in the metric view): `initiated_therapy_count`, `initiated_not_ft_count`,
 `initiated_paid_count` (funnel stages) and `data_refresh_date` = MAX(refresh_date).
 
+Also added, for the persistence and demand charts (current status "Discontinued" is matched
+case- and space-insensitively):
+
+| API key | Formula | Format |
+|---|---|---|
+| `patients_on_drug` | SUM(initiated_therapy) where status is not Discontinued | number |
+| `discontinued_patients` | SUM(initiated_therapy) where status is Discontinued | number |
+| `pct_discontinued` | discontinued / SUM(initiated_therapy) | % (1 dp) |
+| `avg_days_between_fills` | SUM(DATEDIFF(last_shipment_date, first_fill_date)) / SUM(total_shipments − 1), patients with 2+ shipments | number (1 dp) |
+| `trx_per_patient` | SUM(total_days_supplied) / 28 / SUM(new_ptnt_filled) | number (1 dp) |
+
 Ratios are returned as fractions (0.734); format them with the `format` and
 `decimals` in each response's `fields`.
 
@@ -80,6 +91,7 @@ All POST bodies accept `filters` (see below).
 | `POST /api/patients` | patient detail table (paged) | `{"limit": 100, "offset": 0}` |
 | `POST /api/filter-options` | slicer dropdown values (cascading) | `{"dimensions": ["prgrm_nm", "enrolling_hcp_area"]}` |
 | `POST /api/query` | anything else (matrix, custom chart) | `{"measures": [...], "dimensions": [...], "order_by": ["-new_patients_written"]}` |
+| `POST /api/patients-on-drug` | monthly patients on drug (new + continuing), discontinuations, monthly discontinuation rate, launch-cohort (first 4 months of first fills) cumulative discontinuation | `{"filters": {...}}` |
 | `POST /api/cache/clear` | drop cached results after a data refresh | – |
 
 `date_basis`: `enrollment`, `first_fill`, `first_not_ft`, `first_paid`,

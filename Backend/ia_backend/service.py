@@ -10,6 +10,7 @@ or Streamlit app can import and call them directly, e.g.
 from __future__ import annotations
 
 import dataclasses
+import datetime as dt
 import logging
 import threading
 from concurrent.futures import ThreadPoolExecutor
@@ -224,3 +225,103 @@ class InsightAcceleratorService:
 
         with ThreadPoolExecutor(max_workers=min(len(names), self.settings.pool_size)) as pool:
             return dict(pool.map(load, names))
+
+    def patients_on_drug(self, filters: Filters = None) -> dict:
+        """Monthly patients on drug (new + continuing), discontinuations, the monthly
+        discontinuation rate and the launch cohort's cumulative discontinuation.
+
+        attruby_ia has one row per patient, so a patient is on drug from the month of their
+        first fill until the month they were discontinued (current status Discontinued, dated
+        by status_change_date, else latest_status_date). The launch cohort is every patient
+        whose first fill falls in the first LAUNCH_COHORT_MONTHS months of the whole table.
+        """
+        has_fill = {"is_null": False}
+        q = self.builder.aggregate(
+            ["initiated_therapy_count"], _PATIENT_TIMELINE,
+            merge_filters(filters, "first_fill_date", has_fill))
+        first = self.builder.aggregate([], ["first_fill_date"], {"first_fill_date": has_fill},
+                                       order_by=["first_fill_date"], limit=1)
+        launch_rows = self.client.query(first.sql, first.params).rows
+        launch = _month_start(launch_rows[0]["first_fill_date"]) if launch_rows else None
+
+        starts: dict[dt.date, float] = {}
+        stops: dict[dt.date, float] = {}
+        cohort_starts: dict[dt.date, float] = {}
+        cohort_stops: dict[dt.date, float] = {}
+        cohort_end = _add_months(launch, LAUNCH_COHORT_MONTHS - 1) if launch else None
+        for row in self.client.query(q.sql, q.params).rows:
+            weight = _number(row["initiated_therapy_count"]) or 0.0
+            start = _month_start(row["first_fill_date"])
+            stop = None
+            if str(row["current_status"] or "").strip().lower() == "discontinued":
+                stop = _month_start(row["status_change_date"] or row["latest_status_date"]) or start
+                stop = max(stop, start)  # can't stop before the first fill
+            starts[start] = starts.get(start, 0.0) + weight
+            if stop:
+                stops[stop] = stops.get(stop, 0.0) + weight
+            if launch and launch <= start <= cohort_end:
+                cohort_starts[start] = cohort_starts.get(start, 0.0) + weight
+                if stop:
+                    cohort_stops[stop] = cohort_stops.get(stop, 0.0) + weight
+
+        rows = []
+        if starts:
+            month, last = min(starts), max([*starts, *stops])
+            started = stopped_before = cohort_started = cohort_stopped = 0.0
+            while month <= last:
+                started += starts.get(month, 0.0)
+                on_drug = started - stopped_before            # stopped in this month still count
+                new = starts.get(month, 0.0)
+                stopped = stops.get(month, 0.0)
+                cohort_started += cohort_starts.get(month, 0.0)
+                cohort_stopped += cohort_stops.get(month, 0.0)
+                rows.append({
+                    "month": month.isoformat(),
+                    "patients_on_drug": on_drug,
+                    "new_patients_on_drug": new,
+                    "continuing_patients_on_drug": on_drug - new,
+                    "discontinued_patients": stopped,
+                    "discontinuation_rate": stopped / on_drug if on_drug else None,
+                    "launch_cohort_cum_discontinuation":
+                        cohort_stopped / cohort_started if launch and month >= launch and cohort_started else None,
+                })
+                stopped_before += stopped
+                month = _add_months(month, 1)
+
+        columns = list(_ON_DRUG_FIELDS)
+        return {
+            "columns": columns,
+            "fields": [self.model.field_meta(c) if c in self.model.measures else
+                       {"name": c, "type": "measure" if c != "month" else "dimension", **_ON_DRUG_FIELDS[c]}
+                       for c in columns],
+            "rows": rows,
+            "meta": {"launch_month": launch.isoformat() if launch else None,
+                     "launch_cohort_months": LAUNCH_COHORT_MONTHS},
+        }
+
+
+# ---- patients on drug ------------------------------------------------------- #
+LAUNCH_COHORT_MONTHS = 4  # "month 0-3 launch cohort"
+_PATIENT_TIMELINE = ["first_fill_date", "current_status", "status_change_date", "latest_status_date"]
+_ON_DRUG_FIELDS: dict[str, dict] = {
+    "month": {"label": "Month", "format": "date"},
+    "patients_on_drug": {},
+    "new_patients_on_drug": {"label": "New patients on drug", "format": "number", "decimals": 0},
+    "continuing_patients_on_drug": {"label": "Continuing patients on drug", "format": "number", "decimals": 0},
+    "discontinued_patients": {},
+    "discontinuation_rate": {"label": "Monthly discontinuation rate", "format": "percentage", "decimals": 1},
+    "launch_cohort_cum_discontinuation": {"label": "Launch cohort cumulative discontinuation",
+                                          "format": "percentage", "decimals": 1},
+}
+
+
+def _month_start(value: Any) -> dt.date | None:
+    if value is None or value == "":
+        return None
+    day = value if isinstance(value, dt.date) else dt.date.fromisoformat(str(value)[:10])
+    return dt.date(day.year, day.month, 1)
+
+
+def _add_months(month: dt.date, n: int) -> dt.date:
+    index = month.year * 12 + month.month - 1 + n
+    return dt.date(index // 12, index % 12 + 1, 1)

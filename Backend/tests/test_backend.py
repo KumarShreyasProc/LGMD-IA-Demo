@@ -31,6 +31,8 @@ COLUMNS = [
     "initiated_therapy", "initiated_not_free_trial_therapy", "initiated_paid_therapy",
     "total_shipments", "refresh_date", "SP_Start_60d_threshold", "SP_Start_60d_include_rule",
     "EnrollmentQuarterStartDate", "FFQuarterStartDate",
+    "current_status", "status_change_date", "latest_status_date", "last_shipment_date",
+    "total_days_supplied",
 ]
 SQLITE_SAFE_MEASURES = [m for m in MODEL.measures if m != "refresh_timestamp"]  # CURRENT_TIMESTAMP() is Databricks-only
 
@@ -68,7 +70,32 @@ def _make_rows(n: int = 600, seed: int = 7) -> list[dict]:
             "SP_Start_60d_include_rule": 1, "EnrollmentQuarterStartDate": None,
             "FFQuarterStartDate": None,
         })
+    _add_status_columns(rows, random.Random(seed + 1))  # own RNG: the columns above stay as they were
     return rows
+
+
+def _add_status_columns(rows: list[dict], rnd: random.Random) -> None:
+    for r in rows:
+        first = dt.date.fromisoformat(r["first_fill_date"]) if r["first_fill_date"] else None
+        status = rnd.choice(["Active - Paid", "Discontinued", " discontinued ", "Pending", None])
+        changed = first + dt.timedelta(days=rnd.randint(0, 400)) if first else None
+        shipments = r["total_shipments"]
+        r.update({
+            "current_status": status,
+            # some discontinued rows only have latest_status_date (tests the fallback)
+            "status_change_date": changed.isoformat() if changed and rnd.random() < 0.8 else None,
+            "latest_status_date": changed.isoformat() if changed else None,
+            "last_shipment_date": (first + dt.timedelta(days=28 * (shipments - 1) + rnd.randint(0, 20))).isoformat()
+                                  if first and shipments else None,
+            "total_days_supplied": 28 * shipments,
+        })
+
+
+def _datediff(end, start):
+    """Databricks DATEDIFF(end, start) for SQLite."""
+    if end is None or start is None:
+        return None
+    return (dt.date.fromisoformat(str(end)[:10]) - dt.date.fromisoformat(str(start)[:10])).days
 
 
 class SqliteClient:
@@ -76,6 +103,7 @@ class SqliteClient:
 
     def __init__(self, rows: list[dict]):
         self.conn = sqlite3.connect(":memory:", check_same_thread=False)
+        self.conn.create_function("DATEDIFF", 2, _datediff)
         self.conn.execute(f"CREATE TABLE attruby_ia ({', '.join(COLUMNS)})")
         self.conn.executemany(
             f"INSERT INTO attruby_ia VALUES ({', '.join(':' + c for c in COLUMNS)})", rows)
@@ -130,7 +158,24 @@ def reference(rows):
         "initiated_not_ft_count": sum(r["initiated_not_free_trial_therapy"] for r in rows),
         "initiated_paid_count": sum(r["initiated_paid_therapy"] for r in rows),
         "data_refresh_date": max(r["refresh_date"] for r in rows),
+        "patients_on_drug": sum(r["initiated_therapy"] for r in rows if not _discontinued(r)),
+        "discontinued_patients": sum(r["initiated_therapy"] for r in rows if _discontinued(r)),
+        "pct_discontinued": _share(sum(r["initiated_therapy"] for r in rows if _discontinued(r)),
+                                   sum(r["initiated_therapy"] for r in rows)),
+        "avg_days_between_fills": _share(
+            sum(_datediff(r["last_shipment_date"], r["first_fill_date"]) or 0 for r in rows if r["total_shipments"] > 1),
+            sum(r["total_shipments"] - 1 for r in rows if r["total_shipments"] > 1)),
+        "trx_per_patient": _share(sum(r["total_days_supplied"] for r in rows) / 28,
+                                  sum(r["new_ptnt_filled"] for r in rows)),
     }
+
+
+def _discontinued(r):
+    return (r["current_status"] or "").strip().lower() == "discontinued"
+
+
+def _share(num, den):
+    return None if not den else num / den
 
 
 def _close(a, b):
@@ -188,6 +233,48 @@ def test_trend_by_enrollment_week():
     assert periods == sorted(periods)
     keep = [r for r in ROWS if "2025-02-01" <= r["enrollment_date"] <= "2025-04-30"]
     assert _close(sum(r["new_patients_written"] for r in result.rows), reference(keep)["new_patients_written"])
+
+
+def test_patients_on_drug_by_month():
+    filters = {"enrolling_hcp_region": ["East", "West"]}
+    result = _service().patients_on_drug(filters)
+    by_month = {r["month"]: r for r in result["rows"]}
+    fields = {f["name"]: f for f in result["fields"]}
+    assert fields["discontinuation_rate"]["format"] == "percentage"
+    assert fields["patients_on_drug"]["type"] == "measure"
+
+    def month(d):
+        return d[:7] + "-01" if d else None
+
+    def timeline(rows):  # (start month, stop month or None, weight) per patient, brute force
+        out = []
+        for r in rows:
+            if not r["first_fill_date"]:
+                continue
+            start = month(r["first_fill_date"])
+            stop = max(month(r["status_change_date"] or r["latest_status_date"]) or start, start) \
+                if _discontinued(r) else None
+            out.append((start, stop, r["initiated_therapy"]))
+        return out
+
+    launch = min(month(r["first_fill_date"]) for r in ROWS if r["first_fill_date"])
+    assert result["meta"]["launch_month"] == launch
+    cohort_last = f"{launch[:5]}{int(launch[5:7]) + 3:02d}-01"  # test data launches in January
+    patients = timeline([r for r in ROWS if r["enrolling_hcp_region"] in ("East", "West")])
+    assert list(by_month) == sorted(by_month) and min(by_month) == min(s for s, _, _ in patients)
+    for m, row in by_month.items():
+        on = sum(w for s, e, w in patients if s <= m and (e is None or e >= m))
+        stopped = sum(w for _, e, w in patients if e == m)
+        cohort = [(s, e, w) for s, e, w in patients if launch <= s <= cohort_last]
+        cohort_started = sum(w for s, _, w in cohort if s <= m)
+        cohort_stopped = sum(w for _, e, w in cohort if e and e <= m)
+        assert _close(row["patients_on_drug"], on), m
+        assert _close(row["new_patients_on_drug"], sum(w for s, _, w in patients if s == m)), m
+        assert _close(row["new_patients_on_drug"] + row["continuing_patients_on_drug"], on), m
+        assert _close(row["discontinued_patients"], stopped), m
+        assert _close(row["discontinuation_rate"], stopped / on if on else None), m
+        assert _close(row["launch_cohort_cum_discontinuation"],
+                      cohort_stopped / cohort_started if cohort_started else None), m
 
 
 def test_funnel():

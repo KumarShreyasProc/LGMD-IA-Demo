@@ -122,6 +122,12 @@ def filter_options(body: FilterOptionsRequest, request: Request):
     return {"options": _service(request).filter_options(body.dimensions, body.filters, body.limit)}
 
 
+@router.post("/patients-on-drug")
+def patients_on_drug(body: Filtered, request: Request):
+    """Monthly patients on drug, discontinuations and launch-cohort cumulative discontinuation."""
+    return _service(request).patients_on_drug(body.filters)
+
+
 @router.post("/cache/clear")
 def clear_cache(request: Request):
     """Call after the table is refreshed to drop cached results immediately."""

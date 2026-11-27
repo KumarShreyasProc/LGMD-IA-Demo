@@ -196,6 +196,11 @@ _PROGRAM_NOT_FT_TRIMMED = (
 )
 
 
+# Added measures: current status "Discontinued" (any case/spacing), and one TRx unit = 28 days.
+_DISCONTINUED = "COALESCE(LOWER(TRIM(source.current_status)), '') = 'discontinued'"
+STANDARD_DAYS_SUPPLY = 28
+
+
 def _ratio(numerator: str, denominator: str = "new_ptnt_written", where: str | None = None) -> str:
     """SUM(num) / SUM(den), NULL when the denominator is 0 (same as the metric view's CASE)."""
     flt = f" FILTER (WHERE {where})" if where else ""
@@ -243,6 +248,31 @@ MEASURES: list[Measure] = [
     Measure("data_refresh_date", "Data refresh date", "MAX(source.refresh_date)",
             "Latest refresh_date in the table (when the data was loaded)", "timestamp",
             origin="added"),
+    # ---- added for the persistence / demand charts ------------------------ #
+    Measure("patients_on_drug", "Total patients on drug",
+            f"COALESCE(SUM(source.initiated_therapy) FILTER (WHERE NOT ({_DISCONTINUED})), 0)",
+            "Patients who initiated therapy and are not discontinued (current status)",
+            origin="added"),
+    Measure("discontinued_patients", "Discontinued patients",
+            f"COALESCE(SUM(source.initiated_therapy) FILTER (WHERE {_DISCONTINUED}), 0)",
+            "Patients who initiated therapy and whose current status is Discontinued",
+            origin="added"),
+    Measure("pct_discontinued", "% Discontinued (cumulative)",
+            f"CAST(SUM(source.initiated_therapy) FILTER (WHERE {_DISCONTINUED}) AS DOUBLE) "
+            "/ NULLIF(SUM(source.initiated_therapy), 0)",
+            "Discontinued patients / patients who initiated therapy", "percentage", 1,
+            origin="added"),
+    Measure("avg_days_between_fills", "Days between fills",
+            "CAST(SUM(DATEDIFF(source.last_shipment_date, source.first_fill_date)) "
+            "FILTER (WHERE source.total_shipments > 1) AS DOUBLE) "
+            "/ NULLIF(SUM(source.total_shipments - 1) FILTER (WHERE source.total_shipments > 1), 0)",
+            "Days from first fill to last shipment / refills, for patients with 2+ shipments",
+            decimals=1, origin="added"),
+    Measure("trx_per_patient", "TRx per patient",
+            f"CAST(SUM(source.total_days_supplied) AS DOUBLE) / {STANDARD_DAYS_SUPPLY} "
+            "/ NULLIF(SUM(source.new_ptnt_filled), 0)",
+            f"Units (total days supplied / {STANDARD_DAYS_SUPPLY}) / patients filled",
+            decimals=1, origin="added"),
 ]
 
 

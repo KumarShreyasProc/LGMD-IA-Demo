@@ -51,6 +51,8 @@ export const api = {
   trend: (body: { date_basis: DateBasis; grain: 'month'; measures: string[]; filters: ApiFilters }) =>
     request<QueryResult>('trend', body),
   patients: (body: { columns: string[]; filters: ApiFilters; limit: number }) => request<PatientsResult>('patients', body),
+  patientsOnDrug: (filters: ApiFilters) =>
+    request<QueryResult & { meta: { launch_month: string | null; launch_cohort_months: number } }>('patients-on-drug', { filters }),
   filterOptions: (dimensions: string[], filters: ApiFilters) =>
     request<{ options: Record<string, Value[]> }>('filter-options', { dimensions, filters }).then((r) => r.options),
 };

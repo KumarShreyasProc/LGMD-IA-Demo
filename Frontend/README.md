@@ -11,7 +11,7 @@ backend serves the built app at the root URL of the Databricks App.
 | About | Measure definitions from `GET /api/meta`; planned measures are marked "Not available yet" |
 | Summary | Self-serve builder shown as a drill-down matrix: one `POST /api/query` per hierarchy level (subtotals) + `POST /api/kpis` (Total row); slicers from `POST /api/filter-options` |
 | Detailed Table View | `POST /api/patients` (up to 10,000 rows) + `POST /api/kpis` (totals); slicers from `/api/filter-options` |
-| Charts | `POST /api/trend` (monthly series) and `POST /api/query` (NBRx by status) |
+| Charts | `POST /api/trend` (monthly series), `POST /api/query` (NBRx by status, enrollment source shares) and `POST /api/patients-on-drug` (patients on drug, discontinuation) |
 
 - `src/config/model.ts` maps the UI's fields, measures and filters to backend names.
   Items with `live: false` have no backend data yet and are shown as "Not available yet".
