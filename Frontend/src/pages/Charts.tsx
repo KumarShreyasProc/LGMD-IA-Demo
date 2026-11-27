@@ -11,6 +11,7 @@ import { useFilters, pageFilters } from '../state/filters';
 import { MultiSelect } from '../components/MultiSelect';
 import { CARD_BG, INK, OTHER_COLOR, SERIES } from '../config/palette';
 import { AppliedFilters } from '../components/AppliedFilters';
+import { ErrorBoundary } from '../components/ErrorBoundary';
 import { downloadCsv } from '../components/DataTable';
 import { isChart, type VisualConfig } from '../visuals/config';
 import { chartPanels, usePersonalizedVisual, visualCsv } from '../visuals/data';
@@ -87,7 +88,11 @@ function ChartCard({ title, note, state, children, personalize }: {
         <div className={isChart(custom.type) && !(visual.data.data && chartPanels(visual.data.data).length > 1) ? 'chart-area' : 'chart-free'}>
           {visual.data.loading ? <p className="chart-msg">Loading…</p>
             : visual.data.error ? <p className="chart-msg error">Couldn't load data: {visual.data.error}</p>
-            : visual.data.data && <VisualBody data={visual.data.data} label={visual.label} />}
+            : visual.data.data && (
+              <ErrorBoundary what="this visual" resetKey={JSON.stringify(visual.data.data.config)} actions={[{ label: 'Reset to default', run: visual.reset }]}>
+                <VisualBody data={visual.data.data} label={visual.label} />
+              </ErrorBoundary>
+            )}
         </div>
       ) : (
         <div className="chart-area">

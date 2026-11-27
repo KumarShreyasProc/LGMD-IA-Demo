@@ -99,6 +99,15 @@ function load(): FilterState {
   }
 }
 
+/** Forgets every saved filter, field, measure and personalization (used to recover from a broken view). */
+export function forgetSavedState() {
+  try {
+    window.localStorage.removeItem(STORAGE_KEY);
+  } catch {
+    // storage blocked: nothing saved anyway
+  }
+}
+
 function save(state: FilterState) {
   try {
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(state));

@@ -4,7 +4,8 @@ import { Summary } from './pages/Summary';
 import { DetailedTable } from './pages/DetailedTable';
 import { Charts } from './pages/Charts';
 import { api, byName, formatValue, useApi } from './data/api';
-import { useFilters } from './state/filters';
+import { forgetSavedState, useFilters } from './state/filters';
+import { ErrorBoundary } from './components/ErrorBoundary';
 
 const PAGES = { About, Summary, 'Detailed Table View': DetailedTable, Charts } as const;
 type PageName = keyof typeof PAGES;
@@ -51,7 +52,12 @@ export default function App() {
           <ClearAllFilters />
           <RefreshDate />
         </aside>
-        <main className="main"><Current /></main>
+        <main className="main">
+          <ErrorBoundary what={`the ${page} page`} resetKey={page}
+            actions={[{ label: 'Reset saved settings and reload', run: () => { forgetSavedState(); window.location.reload(); } }]}>
+            <Current />
+          </ErrorBoundary>
+        </main>
       </div>
     </div>
   );

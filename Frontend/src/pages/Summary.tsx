@@ -6,6 +6,7 @@ import { MultiSelect } from '../components/MultiSelect';
 import { DateRange } from '../components/DateRange';
 import { downloadCsv } from '../components/DataTable';
 import { AppliedFilters } from '../components/AppliedFilters';
+import { ErrorBoundary } from '../components/ErrorBoundary';
 import { isChart, type VisualConfig } from '../visuals/config';
 import { chartPanels, usePersonalizedVisual, visualCsv, type Binding } from '../visuals/data';
 import { VisualBody } from '../visuals/VisualBody';
@@ -188,7 +189,10 @@ function SummaryVisual({ id, filename, binding, filters, defaults, titleSuffix }
         : data.error ? <p className="error pad">Couldn't load results: {data.error}</p>
         : data.data && (
           <div className={singleChart ? 'visual-frame' : ''}>
-            <VisualBody data={data.data} label={visual.label} />
+            <ErrorBoundary what="this visual" resetKey={JSON.stringify(data.data.config)}
+              actions={visual.personalized ? [{ label: 'Reset to default', run: visual.reset }] : []}>
+              <VisualBody data={data.data} label={visual.label} />
+            </ErrorBoundary>
           </div>
         )}
     </section>

@@ -199,3 +199,8 @@ button { font: inherit; cursor: pointer; }
   .builder, .about-cards, .detail-filters { grid-template-columns: 1fr; }
   .span-2 { grid-column: span 1; }
 }
+
+/* Error boundary: shown instead of a white screen when something fails to render */
+.error-box { border: 1px solid var(--error); background: #fdf3f4; padding: 12px 14px; display: flex; flex-direction: column; gap: 6px; }
+.error-box p { margin: 0; }
+.error-actions { display: flex; gap: 8px; flex-wrap: wrap; }
