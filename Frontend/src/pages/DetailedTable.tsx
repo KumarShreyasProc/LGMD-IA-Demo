@@ -46,8 +46,8 @@ export function DetailedTable() {
   const idSearch = useDebounced(patientId);
   const { filters, applied, notApplied } = pageFilters({ ...state, patientId: idSearch }, 'detail');
   const key = JSON.stringify(filters);
-  const patients = useApi(key, () => api.patients({ columns: COLUMN_IDS, filters, limit: ROW_LIMIT }));
-  const totals = useApi(key, () => api.kpis(Object.values(TOTALS), filters));
+  const patients = useApi(`patients:${key}`, () => api.patients({ columns: COLUMN_IDS, filters, limit: ROW_LIMIT }));
+  const totals = useApi(`patient-totals:${key}`, () => api.kpis(Object.values(TOTALS), filters));
   const options = useFilterOptions(SLICERS, filters);
 
   const meta = byName(patients.data?.fields);

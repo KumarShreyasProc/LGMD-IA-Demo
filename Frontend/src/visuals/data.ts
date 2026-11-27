@@ -35,7 +35,7 @@ export function compareValues(a: Value, b: Value) {
 
 function useVisualData(config: VisualConfig | null, filters: ApiFilters, dims: Map<string, DimensionMeta>): Loadable<VisualData> {
   const plan = config && buildPlan(config, filters, dims);
-  const res = useApi(plan ? JSON.stringify(plan) : null, async () => {
+  const res = useApi(plan ? JSON.stringify(['visual', plan]) : null, async () => {
     const run = (q: Query | null) => (q ? api.query(q) : Promise.resolve(null));
     const [levels, rowTotals, columnTotals, grand] = await Promise.all([
       Promise.all(plan!.levels.map(run)), Promise.all(plan!.rowTotals.map(run)), run(plan!.columnTotals), run(plan!.grand),

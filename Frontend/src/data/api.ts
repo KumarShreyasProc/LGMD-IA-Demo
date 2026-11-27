@@ -90,22 +90,57 @@ export function formatValue(value: Value | undefined, field?: FieldMeta): string
 
 export interface Loadable<T> { data?: T; error?: string; loading: boolean }
 
+// Browser-side cache of successful responses, keyed like useApi (same 5 minutes as the backend's
+// IA_CACHE_TTL_SECONDS). Going back to a selection seen recently shows its data at once instead of
+// "Loading…". Concurrent requests for one key share a single fetch. Errors are never cached.
+const CACHE_MS = 5 * 60 * 1000;
+const CACHE_MAX = 300;
+const cache = new Map<string, { at: number; data?: unknown; pending?: Promise<unknown> }>();
+
+function cachedData<T>(key: string): T | undefined {
+  const hit = cache.get(key);
+  if (!hit || hit.pending || Date.now() - hit.at > CACHE_MS) return undefined;
+  return hit.data as T;
+}
+
+function cachedLoad<T>(key: string, load: () => Promise<T>): Promise<T> {
+  const hit = cache.get(key);
+  if (hit?.pending) return hit.pending as Promise<T>;
+  const pending = load().then(
+    (data) => {
+      cache.delete(key); // re-insert so the Map's order stays oldest-first
+      cache.set(key, { at: Date.now(), data });
+      if (cache.size > CACHE_MAX) cache.delete(cache.keys().next().value!);
+      return data;
+    },
+    (err) => { cache.delete(key); throw err; },
+  );
+  cache.set(key, { at: Date.now(), pending });
+  return pending;
+}
+
+/** Forget cached responses (e.g. after the data is refreshed). */
+export const clearApiCache = () => cache.clear();
+
 /**
  * Loads data whenever `key` changes (`null` = nothing to load). Responses for an
  * older key are ignored, so fast filter changes never show stale results.
+ * `key` must identify the request completely: equal keys share one cached response.
  */
 export function useApi<T>(key: string | null, load: () => Promise<T>): Loadable<T> {
   const [result, setResult] = useState<{ key: string; data?: T; error?: string }>();
+  const fresh = key === null ? undefined : cachedData<T>(key);
   useEffect(() => {
-    if (key === null) return;
+    if (key === null || cachedData(key) !== undefined) return;
     let current = true;
-    load().then(
+    cachedLoad(key, load).then(
       (data) => { if (current) setResult({ key, data }); },
       (err: unknown) => { if (current) setResult({ key, error: err instanceof Error ? err.message : String(err) }); },
     );
     return () => { current = false; };
   }, [key]);
   if (key === null) return { loading: false };
+  if (fresh !== undefined) return { data: fresh, loading: false };
   if (result?.key !== key) return { loading: true };
   return { data: result.data, error: result.error, loading: false };
 }

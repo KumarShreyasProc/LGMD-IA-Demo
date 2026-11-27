@@ -38,7 +38,7 @@ interface ChartData { rows: ChartRow[]; fields: Record<string, FieldMeta> }
 /** Monthly series from /api/trend (the first result column is the month). */
 function useTrend(dateBasis: DateBasis | null, measures: string[], filters: ApiFilters): Loadable<ChartData> {
   const body = dateBasis ? { date_basis: dateBasis, grain: 'month' as const, measures, filters } : null;
-  const res = useApi(body ? JSON.stringify(body) : null, () => api.trend(body!));
+  const res = useApi(body ? JSON.stringify(['trend', body]) : null, () => api.trend(body!));
   const data = res.data && {
     rows: res.data.rows.map((r) => ({ ...r, label: monthLabel(r[res.data!.columns[0]]) })),
     fields: byName(res.data.fields),
