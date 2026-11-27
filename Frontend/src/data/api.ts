@@ -23,7 +23,7 @@ export interface FieldMeta {
 export interface QueryResult { columns: string[]; fields: FieldMeta[]; rows: Row[] }
 export interface KpiResult { values: Row; fields: FieldMeta[] }
 export interface PatientsResult extends QueryResult { total: number; limit: number; offset: number }
-export interface MeasureMeta { name: string; label: string; description: string; format: string; decimals: number }
+export interface MeasureMeta { name: string; label: string; description: string; format: string; decimals: number; expression?: string }
 export interface DimensionMeta { name: string; label: string; kind: string; derived: boolean }
 export interface Meta { measures: MeasureMeta[]; dimensions: DimensionMeta[] }
 export type DateBasis = 'enrollment' | 'first_fill' | 'first_not_ft' | 'first_paid' | 'status_change';

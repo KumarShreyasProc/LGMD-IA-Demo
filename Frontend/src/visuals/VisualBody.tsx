@@ -117,14 +117,27 @@ function renderChart(config: VisualConfig, model: ChartModel, name: (key: string
       );
     default: { // pie / donut: slices are the row values, sized by the first value
       const field = model.series[0]?.field;
+      // Share of the true total when the value is a sum (rows carry `share`); ratios/averages show the value only.
+      const text = (row: Record<string, Value>) =>
+        `${formatValue(row.s0, field)}${typeof row.share === 'number' ? ` (${(row.share * 100).toFixed(1)}%)` : ''}`;
+      const RAD = Math.PI / 180;
+      // Slivers under 3% get no label (they would collide); the legend and tooltip still name them.
+      const sliceLabel = ({ cx, cy, midAngle, outerRadius, percent, payload }: {
+        cx: number; cy: number; midAngle: number; outerRadius: number; percent: number; payload: Record<string, Value>;
+      }) => {
+        if (percent < 0.03) return null;
+        const r = outerRadius + 12;
+        const x = cx + r * Math.cos(-midAngle * RAD);
+        const y = cy + r * Math.sin(-midAngle * RAD);
+        return <text x={x} y={y} fill={INK} fontSize={11} textAnchor={x > cx ? 'start' : 'end'} dominantBaseline="central">{text(payload)}</text>;
+      };
       return (
-        <PieChart>
-          <Tooltip formatter={(value: unknown) => formatValue(value as Value, field)} />
+        <PieChart margin={{ top: 16, bottom: 4 }}>
+          <Tooltip formatter={(_v: unknown, _n: unknown, item: { payload?: Record<string, Value> }) => (item.payload ? text(item.payload) : '')} />
           <Legend wrapperStyle={{ fontSize: 11 }} formatter={legendText} />
-          <Pie data={model.rows} dataKey="s0" nameKey="label" innerRadius={config.type === 'donut' ? '55%' : 0} outerRadius="80%"
-            stroke={CARD_BG} strokeWidth={2} isAnimationActive={false}
-            label={({ value, percent }: { value: number; percent: number }) => `${formatValue(value, field)} (${(percent * 100).toFixed(1)}%)`}>
-            {model.rows.map((r, i) => <Cell key={String(r.label)} fill={SERIES[i]} />)}
+          <Pie data={model.rows} dataKey="s0" nameKey="label" innerRadius={config.type === 'donut' ? '50%' : 0} outerRadius="70%"
+            stroke={CARD_BG} strokeWidth={2} isAnimationActive={false} labelLine={false} label={sliceLabel}>
+            {model.rows.map((r, i) => <Cell key={String(r.label)} fill={typeof r.color === 'string' ? r.color : SERIES[i]} />)}
           </Pie>
         </PieChart>
       );

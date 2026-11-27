@@ -3,9 +3,10 @@
 // ratios are never summed or averaged in the browser.
 import {
   api, byName, formatValue, useApi, useMeta,
-  type ApiFilters, type DimensionMeta, type FieldMeta, type Loadable, type QueryResult, type Row, type Value,
+  type ApiFilters, type DimensionMeta, type MeasureMeta, type FieldMeta, type Loadable, type QueryResult, type Row, type Value,
 } from '../data/api';
 import { useFilters } from '../state/filters';
+import { OTHER_COLOR, SERIES } from '../config/palette';
 import { againstMeta, isChart, isPie, makeLabeler, normalize, visualTitle, type VisualConfig } from './config';
 
 export const ROW_LIMIT = 5000;   // per query
@@ -22,6 +23,7 @@ export interface VisualData {
   grand?: Row;               // table / matrix: no dimensions
   columnValues: Value[];     // column values shown (top N by the first value), in display order
   columnCount: number;       // all column values
+  additive: Set<string>;     // values that are plain sums, so parts can be added up (e.g. a pie's "All others")
   truncated: boolean;
 }
 
@@ -33,7 +35,10 @@ export function compareValues(a: Value, b: Value) {
   return typeof a === 'number' && typeof b === 'number' ? a - b : String(a).localeCompare(String(b), undefined, { numeric: true });
 }
 
-function useVisualData(config: VisualConfig | null, filters: ApiFilters, dims: Map<string, DimensionMeta>): Loadable<VisualData> {
+/** A measure that is a plain SUM (no ratio or average): its values for parts add up to the whole. */
+const isAdditive = (m?: MeasureMeta) => !!m?.expression && /^(COALESCE\()?SUM\(/i.test(m.expression.trim()) && !m.expression.includes('/');
+
+function useVisualData(config: VisualConfig | null, filters: ApiFilters, dims: Map<string, DimensionMeta>, measures: MeasureMeta[]): Loadable<VisualData> {
   const plan = config && buildPlan(config, filters, dims);
   const res = useApi(plan ? JSON.stringify(['visual', plan]) : null, async () => {
     const run = (q: Query | null) => (q ? api.query(q) : Promise.resolve(null));
@@ -62,6 +67,7 @@ function useVisualData(config: VisualConfig | null, filters: ApiFilters, dims: M
       grand: grand?.rows[0],
       columnValues: shown.sort(compareValues),
       columnCount: ranked.length,
+      additive: new Set(config.values.filter((v) => isAdditive(measures.find((m) => m.name === v)))),
       truncated: all.some((r) => r.rows.length >= ROW_LIMIT),
     },
   };
@@ -133,7 +139,7 @@ export function usePersonalizedVisual({ id, defaults, filters, loadDefault, boun
     draft = saved ?? config ?? { type: 'matrix', rows: [], columns: null, values: [] };
   }
   const ready = config && (override || loadDefault) && metaSettled;
-  const data = useVisualData(ready ? config : null, filters, dims);
+  const data = useVisualData(ready ? config : null, filters, dims, meta.data?.measures ?? []);
   const label = makeLabeler(meta.data);
 
   const set = (next: VisualConfig) => {
@@ -177,6 +183,8 @@ export function displayValue(value: Value, name: string, field?: FieldMeta) {
 const rowKey = (row: Row, names: string[]) => JSON.stringify(names.map((n) => row[n] ?? null));
 
 export const MAX_CATEGORIES = 60; // chart axis categories shown
+export const ALL_OTHERS = 'All others';
+const descending = (name: string) => (a: Row, b: Row) => Number(b[name] ?? -Infinity) - Number(a[name] ?? -Infinity);
 
 /**
  * Which values share one chart. One axis per chart: counts and percentages get separate charts so
@@ -208,8 +216,20 @@ export function chartModel(data: VisualData, values: string[]): ChartModel {
   const first = values[0];
 
   if (isPie(config.type)) {
-    const top = [...categorySource(data)].sort((a, b) => Number(b[first] ?? 0) - Number(a[first] ?? 0)).slice(0, MAX_SERIES);
-    return { rows: top.map((r) => ({ label: label(r), s0: r[first] ?? null })), series: [{ key: 's0', name: first, field: fields[first] }] };
+    // Colors follow the category (ranked by the visual's first value), so every pie colors it the same.
+    const rank = new Map([...categorySource(data)].sort(descending(config.values[0])).map((r, i) => [label(r), i]));
+    const color = (name: string) => { const i = rank.get(name) ?? MAX_SERIES; return i < MAX_SERIES - 1 ? SERIES[i] : OTHER_COLOR; };
+    const all = [...categorySource(data)].sort(descending(first)).map((r) => ({ label: label(r), value: r[first] ?? null }));
+    const additive = data.additive.has(first);
+    const total = additive ? all.reduce((s, x) => s + Number(x.value ?? 0), 0) : 0;
+    // Too many slices: a sum folds the rest into "All others" (shares stay true); anything else keeps the largest.
+    const slices = all.length <= MAX_SERIES ? all
+      : additive ? [...all.slice(0, MAX_SERIES - 1), { label: ALL_OTHERS, value: all.slice(MAX_SERIES - 1).reduce((s, x) => s + Number(x.value ?? 0), 0) }]
+      : all.slice(0, MAX_SERIES);
+    return {
+      rows: slices.map((s) => ({ label: s.label, s0: s.value, share: total ? Number(s.value ?? 0) / total : null, color: s.label === ALL_OTHERS ? OTHER_COLOR : color(s.label) })),
+      series: [{ key: 's0', name: first, field: fields[first] }],
+    };
   }
   if (!columns) {
     return {
@@ -241,7 +261,12 @@ export function visualNotes(data: VisualData, label: (name: string) => string): 
   if (config.columns && !pie && columnCount > columnValues.length) {
     notes.push(`Showing the top ${columnValues.length} of ${columnCount.toLocaleString()} ${label(config.columns)} values by ${label(config.values[0])}.`);
   }
-  if (pie && categories > MAX_SERIES) notes.push(`Showing the ${MAX_SERIES} largest of ${categories.toLocaleString()} slices.`);
+  if (pie && categories > MAX_SERIES) {
+    const summed = config.values.filter((v) => data.additive.has(v)).length === config.values.length;
+    notes.push(summed
+      ? `The ${MAX_SERIES - 1} largest of ${categories.toLocaleString()} slices are shown; the rest are combined as “${ALL_OTHERS}”.`
+      : `Showing the ${MAX_SERIES} largest of ${categories.toLocaleString()} slices (these values are ratios or averages, so the rest can't be combined).`);
+  }
   if (!pie && categories > MAX_CATEGORIES) {
     notes.push(`Showing the first ${MAX_CATEGORIES} of ${categories.toLocaleString()} ${config.rows.map(label).join(' › ')} values on the chart (Export CSV has all).`);
   }
