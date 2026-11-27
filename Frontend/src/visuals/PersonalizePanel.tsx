@@ -15,8 +15,6 @@ export function PersonalizeButton({ open, onClick }: { open: boolean; onClick: (
   );
 }
 
-const EMPTY: VisualConfig = { type: 'matrix', rows: [], columns: null, values: [] };
-
 /** Side panel like Power BI's: visual type, Rows, Columns, Values, Reset. Changes apply and save right away. */
 export function PersonalizePanel({ visual, onClose }: { visual: PersonalizedVisual; onClose: () => void }) {
   const ref = useRef<HTMLElement>(null);
@@ -30,12 +28,13 @@ export function PersonalizePanel({ visual, onClose }: { visual: PersonalizedVisu
     return () => document.removeEventListener('keydown', onKey);
   }, []);
 
-  const current = visual.saved ?? visual.config ?? EMPTY;
+  const current = visual.draft;
   const change = (patch: Partial<VisualConfig>) => visual.set(normalize({ ...current, ...patch }));
-  const meta = visual.meta.data;
   const byLabel = (a: { label: string }, b: { label: string }) => a.label.localeCompare(b.label);
-  const dims = (meta?.dimensions ?? []).map((d) => ({ name: d.name, label: visual.label(d.name) })).sort(byLabel);
-  const measures = (meta?.measures ?? []).map((m) => ({ name: m.name, label: visual.label(m.name) })).sort(byLabel);
+  const options = (names: string[]) => names.map((name) => ({ name, label: visual.label(name) })).sort(byLabel);
+  const rowOptions = options(visual.rowOptions);
+  const dims = options((visual.meta.data?.dimensions ?? []).map((d) => d.name)); // Columns can be any dimension
+  const measures = options(visual.valueOptions);
 
   return (
     <aside className="personalize" role="dialog" aria-modal="false" aria-labelledby={headingId} tabIndex={-1} ref={ref}>
@@ -44,6 +43,9 @@ export function PersonalizePanel({ visual, onClose }: { visual: PersonalizedVisu
         <button type="button" className="close" aria-label="Close" onClick={onClose}>✕</button>
       </header>
       <p className="muted">Changes apply right away and are saved in this browser.</p>
+      {visual.bound && (
+        <p className="muted">Rows and Values are the page's Select Fields and Select Measures lists: changing them here changes them there, for the table and the chart.</p>
+      )}
       {visual.meta.error && <p className="error">Couldn't load the field list: {visual.meta.error}</p>}
 
       <fieldset>
@@ -56,7 +58,7 @@ export function PersonalizePanel({ visual, onClose }: { visual: PersonalizedVisu
         </div>
       </fieldset>
 
-      <FieldWell title={isPie(current.type) ? 'Rows (slices)' : 'Rows (axis)'} items={current.rows} options={dims.filter((d) => d.name !== current.columns)}
+      <FieldWell title={isPie(current.type) ? 'Rows (slices)' : 'Rows (axis)'} items={current.rows} options={rowOptions.filter((d) => d.name !== current.columns)}
         label={visual.label} onChange={(rows) => change({ rows })} />
 
       <label className="well">
@@ -70,7 +72,8 @@ export function PersonalizePanel({ visual, onClose }: { visual: PersonalizedVisu
       <FieldWell title="Values" items={current.values} options={measures} label={visual.label} onChange={(values) => change({ values })} />
 
       {isPie(current.type) && <p className="muted">Pie and donut charts use the first value and ignore Columns.</p>}
-      <button type="button" className="reset" disabled={!visual.saved} onClick={visual.reset}>Reset to default</button>
+      <button type="button" className="reset" disabled={!visual.personalized} onClick={visual.reset}>Reset to default</button>
+      {visual.bound && <p className="muted">Reset to default restores the visual type and Columns; the field and measure lists stay as they are.</p>}
     </aside>
   );
 }

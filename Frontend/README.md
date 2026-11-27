@@ -23,9 +23,13 @@ backend serves the built app at the root URL of the Databricks App.
   in the data are dropped. Each page applies only the filters it has slicers for
   (`PAGE_FILTERS` in `model.ts`) and lists the others as "Saved, not used on this page".
   "Clear all filters" in the sidebar resets everything to the defaults.
-- "Personalize this visual" (the chart-with-pencil icon on the Summary visual and on the
+- The Summary page shows the selection twice: a table (matrix) and a chart below it. Both always
+  use the checked fields and measures; their personalize panels edit those same lists and save
+  only the visual type and Columns. Charts put counts and percentages on separate charts (one
+  axis each), and with Columns as the legend or for pie/donut show one chart per measure.
+- "Personalize this visual" (the chart-with-pencil icon on the Summary visuals and on the
   charts that read `/api/query`) opens a side panel: visualization type, Rows, Columns and
-  Values from `/api/meta`. `src/visuals/` loads the data with one `/api/query` per grouping:
+  Values (on the Charts page from `/api/meta`). `src/visuals/` loads the data with one `/api/query` per grouping:
   rows + columns, rows only (row totals and matrix subtotals), columns only (column totals,
   top 25 matrix columns / 8 chart series) and no dimensions (grand total), so percentage
   totals are never summed or averaged. Personalizations are saved with the shared state

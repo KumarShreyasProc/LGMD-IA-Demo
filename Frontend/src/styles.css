@@ -166,7 +166,13 @@ button { font: inherit; cursor: pointer; }
 .visual-frame { height: 440px; }
 .visual { display: flex; flex-direction: column; gap: 4px; }
 .visual.is-chart { height: 100%; }
-.visual-plot { flex: 1; min-height: 0; }
+.visual-plot { flex: 1; min-height: 0; display: flex; }
+.visual-plot-fill { flex: 1; min-width: 0; }
+.visual.multi { height: auto; }
+.visual-panels { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 10px; }
+.visual-panel { margin: 0; display: flex; flex-direction: column; gap: 2px; }
+.visual-panel figcaption { font-size: 12px; font-weight: 600; color: var(--ink); }
+.visual-panel-plot { height: 260px; }
 .visual-note { margin: 0; }
 .chart-free { max-height: 420px; overflow: auto; }
 .matrix th.group { text-align: center; padding: 6px 8px; border-left: 1px solid rgba(255,255,255,.35); }

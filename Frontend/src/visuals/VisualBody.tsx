@@ -7,7 +7,7 @@ import { CARD_BG, INK, SERIES } from '../config/palette';
 import { DataTable } from '../components/DataTable';
 import { Matrix } from '../components/Matrix';
 import { isChart, isPie, type VisualConfig } from './config';
-import { chartModel, displayValue, visualNotes, type ChartModel, type VisualData } from './data';
+import { chartModel, chartPanels, displayValue, visualNotes, type ChartModel, type VisualData } from './data';
 
 const axis = { fontSize: 11, fill: '#605E5C' };
 const compact = new Intl.NumberFormat(undefined, { notation: 'compact', maximumFractionDigits: 1 });
@@ -39,19 +39,30 @@ export function VisualBody({ data, label }: { data: VisualData; label: (name: st
         rowTotals={config.columns ? data.rowTotals : undefined} columnTotals={data.columnTotals} />
     );
   } else {
-    const model = chartModel(data);
-    const name = (key: string) => {
-      const s = model.series.find((x) => x.key === key);
-      return !s ? key : config.columns && !isPie(config.type) ? s.name : label(s.name);
-    };
+    // One chart per panel: values sharing a scale, or one per value with a legend / for pies.
+    const panels = chartPanels(data);
+    const titled = panels.length > 1;
     body = (
-      <div className="visual-plot">
-        <ResponsiveContainer width="100%" height="100%">{renderChart(config, model, name)}</ResponsiveContainer>
+      <div className={titled ? 'visual-panels' : 'visual-plot'}>
+        {panels.map((values) => {
+          const model = chartModel(data, values);
+          const name = (key: string) => {
+            const s = model.series.find((x) => x.key === key);
+            return !s ? key : config.columns && !isPie(config.type) ? s.name : label(s.name);
+          };
+          const chart = <ResponsiveContainer width="100%" height="100%">{renderChart(config, model, name)}</ResponsiveContainer>;
+          return titled ? (
+            <figure key={values.join()} className="visual-panel">
+              <figcaption>{values.map(label).join(', ')}</figcaption>
+              <div className="visual-panel-plot">{chart}</div>
+            </figure>
+          ) : <div key={values.join()} className="visual-plot-fill">{chart}</div>;
+        })}
       </div>
     );
   }
   return (
-    <div className={`visual ${isChart(config.type) ? 'is-chart' : ''}`}>
+    <div className={`visual ${isChart(config.type) ? `is-chart${chartPanels(data).length > 1 ? ' multi' : ''}` : ''}`}>
       {body}
       {visualNotes(data, label).map((n) => <p key={n} className="muted visual-note">{n}</p>)}
     </div>

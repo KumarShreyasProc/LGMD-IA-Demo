@@ -13,7 +13,7 @@ import { CARD_BG, INK, OTHER_COLOR, SERIES } from '../config/palette';
 import { AppliedFilters } from '../components/AppliedFilters';
 import { downloadCsv } from '../components/DataTable';
 import { isChart, type VisualConfig } from '../visuals/config';
-import { usePersonalizedVisual, visualCsv } from '../visuals/data';
+import { chartPanels, usePersonalizedVisual, visualCsv } from '../visuals/data';
 import { VisualBody } from '../visuals/VisualBody';
 import { PersonalizeButton, PersonalizePanel } from '../visuals/PersonalizePanel';
 
@@ -63,7 +63,7 @@ function ChartCard({ title, note, state, children, personalize }: {
   title: string; note?: string; state: Loadable<{ rows: unknown[] }>; children: ReactElement; personalize?: Personalize;
 }) {
   const [open, setOpen] = useState(false);
-  const visual = usePersonalizedVisual(personalize?.id ?? null, personalize?.defaults ?? null, personalize?.filters ?? NO_FILTERS, false);
+  const visual = usePersonalizedVisual({ id: personalize?.id ?? null, defaults: personalize?.defaults ?? null, filters: personalize?.filters ?? NO_FILTERS, loadDefault: false });
   const custom = visual.override; // personalized: drawn from /api/query instead of the designed chart
   const message = state.loading ? 'Loading…'
     : state.error ? `Couldn't load data: ${state.error}`
@@ -84,7 +84,7 @@ function ChartCard({ title, note, state, children, personalize }: {
       </div>
       {custom ? personalize?.scope && <p className="muted">{personalize.scope}</p> : note && <p className="muted">{note}</p>}
       {custom ? (
-        <div className={isChart(custom.type) ? 'chart-area' : 'chart-free'}>
+        <div className={isChart(custom.type) && !(visual.data.data && chartPanels(visual.data.data).length > 1) ? 'chart-area' : 'chart-free'}>
           {visual.data.loading ? <p className="chart-msg">Loading…</p>
             : visual.data.error ? <p className="chart-msg error">Couldn't load data: {visual.data.error}</p>
             : visual.data.data && <VisualBody data={visual.data.data} label={visual.label} />}
